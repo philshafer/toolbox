@@ -1,0 +1,7 @@
+#!/bin/sh
+cd ~/.ssh
+echo setenv DISPLAY :0 > socket
+echo setenv SSH_AGENT_PID $SSH_AGENT_PID >> socket
+echo setenv SSH_AUTH_SOCK $SSH_AUTH_SOCK >> socket
+awk '{printf("(setenv \"%s\" \"%s\")\n", $2, $3);}' < socket > socket.el
+exit 0
