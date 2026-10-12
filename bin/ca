@@ -1,0 +1,77 @@
+#!/usr/bin/perl
+
+use utf8;
+use Data::Dumper;
+use Encode qw(encode decode);
+
+binmode STDOUT, ":encoding(UTF-8)";
+binmode STDIN, ":encoding(UTF-8)";
+use open ':std', ':encoding(UTF-8)';
+
+$nc_tax_rate = 1.7947;
+
+$total = shift if $ARGV[0] eq "total";
+$ascii = shift if $ARGV[0] eq "ascii";
+$hex = shift if $ARGV[0] eq "hex";
+$bits = shift if $ARGV[0] eq "bits";
+$utf8 = shift if $ARGV[0] eq "utf8";
+
+$n = 0;
+while ($i = <STDIN>) {
+    chop($i);
+    $saved = $i;
+    $i = "0x$i" if $hex;
+    $_ = $x = eval $i;
+    $total_value += $x;
+    next if $total;
+
+    eval "\$x$n = \'$x\'";
+    if ($ascii) {
+	printf("%c", $x);
+
+    } elsif ($bits) {
+        $b = sprintf("%b", $x);
+        my $z = 1;
+        $b = join("", reverse(map {(($z++ & 3) == 0) ? ".$_" : $_} reverse(split(//, $b))));
+        printf("x%d: %s (0x%x) [0%o] [b.%s]\n", $n, $x, $x, $x, $b);
+        $i = $saved;
+        if ($i =~ /^[0-9abcdefABCDEF]+$/) {
+            $i = eval "\"\\x{$i}\"";
+	} else {
+            $i = eval "\"$i\"";
+	}
+
+	printf("'%s'\n", $i);
+
+    } elsif ($utf8) {
+	$o = ord($i);
+	$t = encode('utf-8', $i);
+	$f = unpack('H*', $t);
+	$f = join(' ', split(/(..)/, $f));
+        $f =~ s/^ //;
+	printf("%s (0x%x) [0%o] [%s]\n", $o, $o, $o, $f);
+
+    } else {
+        printf("x%d: %s (0x%x) [0%o]\n", $n, $x, $x, $x);
+    }
+    $n += 1;
+}
+
+print $total_value, "\n" if $total;
+exit(0);
+
+sub hex {
+    unpack("H*", @_[0]);
+}
+
+sub utf {
+    for $i (@_) {
+        my $e = $i;
+        my $d = $i;
+        utf8::encode($e);
+        utf8::decode($d);
+        my $is = utf8::is_utf8($i);
+        my $valid = utf8::valid($i);
+        printf("'%s' '%s' [%s] [%s]\n", $d, $e, $is, $valid);
+    }
+}
