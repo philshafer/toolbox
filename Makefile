@@ -32,7 +32,7 @@ bin-files:
 	    fi ; \
 	done
 
-tools:  build-title install-ytplay
+tools:  build-title install-ytplay install-claude-sandbox
 
 FORCE=
 
@@ -45,4 +45,11 @@ install-ytplay: ${DESTDIR}/ytplay
 
 ${DESTDIR}/ytplay: ytplay/ytplay.sh ${FORCE}
 	ln -s -f .toolkit/ytplay/ytplay.sh ${DESTDIR}/ytplay
+
+install-claude-sandbox: ${DESTDIR}/claude-sandbox
+
+CSB = claude-sandbox
+
+${DESTDIR}/${CSB}: ${CSB}/${CSB}.pl ${FORCE}
+	ln -s -f .toolkit/${CSB}/${CSB}.pl ${DESTDIR}/${CSB}
 
