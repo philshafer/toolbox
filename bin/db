@@ -1,0 +1,38 @@
+#!/bin/sh
+#
+bin=$1 ; shift
+
+case "$bin" in 
+     */*)
+	alt=`echo "$bin" | sed -E -e 's:/([^/]*)$:/.libs/\1:'`
+	;;
+
+    *)
+	alt=".libs/$bin"
+	;;
+esac
+
+if [ -x "$alt" ]; then
+    bin="$alt"
+fi
+
+# simple answer doesn't work for clang-14
+#exec lldb -O "settings set target.run-arguments-mode simple" $bin -- "$@"
+#
+
+# Build an array of LLDB command arguments
+lldb_args=()
+for arg in "$@"; do
+    escaped_arg=$(printf '%s' "$arg" | sed -e 's/[{}]/\\&/g' -e 's/"/\\"/g')
+    #escaped_arg=$(printf '%s' "$arg" | sed -e 's/[][{}|]/\\&/g' -e 's/"/\\"/g' -e 's/&/\\&/g')
+    lldb_args+=("-O" "settings append target.run-args \"$escaped_arg\"")
+done
+
+#exec lldb -O "settings clear target.run-args" "${lldb_args[@]}" "$bin"
+
+exec lldb \
+  -O "settings clear target.run-args" \
+  "${lldb_args[@]}" \
+  -O "command alias run process launch -X false --" \
+  "$bin"
+
