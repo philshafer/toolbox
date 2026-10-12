@@ -1,0 +1,9 @@
+#!/bin/sh
+
+EDITOR=/usr/bin/vi
+export EDITOR
+title "CScope: `pwd`"
+cscope -d -p4 "$@"
+title > /dev/null
+
+exit 0
