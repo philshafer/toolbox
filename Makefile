@@ -16,6 +16,9 @@ ${BASELINK}:
 # DEB="set -x;"
 DEB=@
 
+# FORCE=.
+FORCE=
+
 bin-files:
 	${DEB} for file in `cd bin; find . -type f`; do \
 	    base=`basename $$file` ; \
@@ -24,7 +27,7 @@ bin-files:
 		if [ "$$old" != .toolkit/bin/$$base ]; then \
 		    echo "[ $$base is another link: $$old ]"; \
 		fi ; \
-	    elif [ -f ${DESTDIR}/$$base ]; then \
+	    elif [ -f ${DESTDIR}/$$base -a -z ${FORCE} ]; then \
 		echo "[ $$base is a file ]"; \
 	    else \
 		echo "+ $$base" ; \
@@ -33,8 +36,6 @@ bin-files:
 	done
 
 tools:  build-title install-ytplay install-claude-sandbox
-
-FORCE=
 
 build-title: ${DESTDIR}/title
 
