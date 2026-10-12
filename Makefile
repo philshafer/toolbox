@@ -27,7 +27,7 @@ bin-files:
 		if [ "$$old" != .toolkit/bin/$$base ]; then \
 		    echo "[ $$base is another link: $$old ]"; \
 		fi ; \
-	    elif [ -f ${DESTDIR}/$$base -a -z ${FORCE} ]; then \
+	    elif [ -f ${DESTDIR}/$$base -a -z "${FORCE}" ]; then \
 		echo "[ $$base is a file ]"; \
 	    else \
 		echo "+ $$base" ; \
