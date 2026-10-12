@@ -1,0 +1,12 @@
+#!/bin/sh
+
+for i in "$@"; do
+    j=`echo $i | sed 's: :-:g' | tr '[A-Z]' '[a-z]'`
+    if [ "$j" != "$i" ]; then
+        echo "$i -> $j ..."
+        # Macos case insensitivity doesn't like "mv A a"
+        mv "$i" "tmp.$j"
+        mv -i "tmp.$j" "$j"
+    fi
+done
+
