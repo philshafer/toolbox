@@ -1,0 +1,9 @@
+#!/bin/sh
+
+TMP=/tmp/pb.$USER.$$
+
+pbpaste > $TMP
+pbcopy < $TMP
+rm $TMP
+
+exit 0
