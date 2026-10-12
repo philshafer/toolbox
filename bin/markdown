@@ -1,0 +1,25 @@
+#!/bin/sh
+
+DIR=/tmp/phil.md
+rm -fr ${DIR}/md-*.html
+
+mkdir -p ${DIR}
+
+run_it() {
+echo '<body style="margin-left: 200px;margin-right: 200px;">'
+# python -m markdown "$1"
+npx marked -i "$1"
+echo '</body>'
+}
+
+for file in "$@"; do
+
+    base=`basename "$file"`
+    out="$DIR/md-$base-$$.html"
+
+    run_it "$file" > "$out"
+
+    open "$out"
+done
+
+exit 0
