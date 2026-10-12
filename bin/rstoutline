@@ -1,0 +1,47 @@
+#!/usr/bin/perl
+
+$chars = "-=_~\+\@\*";
+$depth = 128;
+
+while ($ARGV[0] =~ /^-/) {
+    $_ = shift @ARGV;
+    $chars = shift @ARGV if /^-c/;
+    $depth = shift @ARGV if /^-m/;
+}
+
+$file = shift @ARGV;
+
+open(PIPE, "egrep -B1 '^[$chars]{3}' $file |") || die;
+@input = <PIPE>;
+close PIPE;
+
+chomp(@input);
+push @input, "--";
+%parent = ();
+
+$max = $#input;
+
+for ($i = 0; $i <= $max; $i++) {
+    $line = $input[$i];
+    next unless $line =~ /^--$/;
+
+    next unless $i >= 2;
+
+    $title = $input[$i - 2];
+    $bars = $input[$i - 1];
+    next unless $title && $bars;
+
+    $type = substr($bars, 0, 1);
+
+    next if $bars =~ / /;
+
+    $parent{$type} = $parent{$last} + 1 unless $parent{$type};
+    $info = "*" x $parent{$type};
+    $last = $type;
+
+    next unless $parent{$type} <= $depth;
+
+    print $type, " ", $info, " ", $title, "\n";
+}
+
+0;
