@@ -1,0 +1,27 @@
+#!/bin/sh
+
+DIR=~/patches/claude
+tstamp=`/bin/date "+%y%m%d%H%M.%S"`
+
+info="$1"
+case "$info" in
+    \+*)
+	shift
+	file="$1"
+	shift
+	;;
+    *)
+	file="$info"
+	info=
+	;;
+esac
+
+record=$DIR/$tstamp.txt
+
+cp $file $record
+
+vi $record
+
+cp $record $file
+
+exit 0
