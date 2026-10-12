@@ -1,0 +1,55 @@
+#!/usr/bin/env python
+
+import docutils.core 
+import sys, getopt
+import os
+  
+def html(input, output):
+    docutils.core.publish_file( 
+        source_path = input,
+        destination_path = output,
+        writer_name ="html") 
+
+def main(argv):
+   inputfile = ''
+   outputfile = ''
+
+   DIR = "/tmp/phil.md"
+   os.system(f"rm -fr {DIR}/md-*.html")
+
+   os.system(f"mkdir -p {DIR}")
+
+   opts, args = getopt.getopt(argv,"hi:o:",["ifile=","ofile="])
+   for opt, arg in opts:
+      if opt == '-h':
+         print ('rst2html -i <inputfile> -o <outputfile>')
+         sys.exit()
+      elif opt in ("-i", "--ifile"):
+         inputfile = arg
+      elif opt in ("-o", "--ofile"):
+         outputfile = arg
+
+#   print ('Input file is ', inputfile)
+#   print ('Output file is ', outputfile)
+
+   if len(inputfile) == 0:
+      if len(args) > 0:
+         inputfile = args.pop(0)
+      else:
+         inputfile = '/dev/stdin'
+
+   if len(outputfile) == 0:
+      if len(args) > 0:
+         outputfile = args.pop(0)
+      else:
+         pid = os.getpid()
+         base = os.path.basename(inputfile)
+         outputfile = f"{DIR}/md-{pid}-{base}.html"
+
+   html(inputfile, outputfile)
+
+   os.system(f"open {outputfile}")
+
+if __name__ == "__main__":
+   main(sys.argv[1:])
+
