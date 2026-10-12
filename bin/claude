@@ -1,0 +1,9 @@
+#!/bin/sh
+
+#export NO_COLOR=1
+export COLORTERM=truecolor
+export CLAUDE_CODE_DISABLE_1M_CONTEXT=1
+export EDITOR=$HOME/bin/claude-vi
+export VISUAL=$HOME/bin/claude-vi
+
+exec ~/.local/bin/claude "$@"
