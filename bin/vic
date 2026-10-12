@@ -1,0 +1,31 @@
+#!/bin/sh
+
+name=$0
+
+oIFS="${IFS}"
+IFS=:
+set -- $1
+FN=$1
+LN=$2
+
+IFS="${oIFS}"
+
+case "$name" in
+    mic)
+	CMD=more
+        ;;
+    *)
+        CMD=vi
+        ;;
+esac
+
+case "$LN" in
+    [_a-zA-Z][_a-zA-Z][_a-zA-Z][_a-zA-Z]*)
+        ARG="+/$LN"
+        ;;
+    *)
+        ARG="+$LN"
+        ;;
+esac
+
+exec $CMD $ARG $FN
