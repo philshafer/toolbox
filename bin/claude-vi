@@ -6,6 +6,7 @@ tstamp=`/bin/date "+%y%m%d%H%M.%S"`
 info="$1"
 case "$info" in
     \+*)
+        args="$args $1"
 	shift
 	file="$1"
 	shift
@@ -18,9 +19,11 @@ esac
 
 record=$DIR/$tstamp.txt
 
+mkdir -p $DIR
+
 cp $file $record
 
-vi $record
+vi $args $record
 
 cp $record $file
 
