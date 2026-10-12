@@ -1,0 +1,7 @@
+#!/bin/sh
+
+file=$1
+
+groff="groff -Wall -mtty-char -Tascii -mandoc -c"
+( echo ".ll 8.1i" ; echo ".nr LL 8.1i" ; /bin/cat $1 ) | tbl | $groff
+exit $?
