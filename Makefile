@@ -35,12 +35,18 @@ bin-files:
 	    fi ; \
 	done
 
-tools:  build-title install-ytplay install-claude-sandbox
+INSTALL_TOOLS = \
+    install-claude-sandbox \
+    install-memdump \
+    install-title \
+    install-ytplay
 
-build-title: ${DESTDIR}/title
+tools:  ${INSTALL_TOOLS}
 
-${DESTDIR}/title: src/title/title.c ${FORCE}
-	cc -O -o ${DESTDIR}/title src/title/title.c
+install-title: ${DESTDIR}/title
+
+${DESTDIR}/title: title/title.c ${FORCE}
+	cc -O -o ${DESTDIR}/title title/title.c
 
 install-ytplay: ${DESTDIR}/ytplay
 
@@ -53,4 +59,9 @@ CSB = claude-sandbox
 
 ${DESTDIR}/${CSB}: ${CSB}/${CSB}.pl ${FORCE}
 	ln -s -f .toolkit/${CSB}/${CSB}.pl ${DESTDIR}/${CSB}
+
+install-memdump: ${DESTDIR}/memdump
+
+${DESTDIR}/memdump: memdump/memdump.c ${FORCE}
+	cc -O -DMAIN -o ${DESTDIR}/memdump memdump/memdump.c
 
