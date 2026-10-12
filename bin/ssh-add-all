@@ -1,0 +1,10 @@
+#!/bin/sh
+
+for id in `cat ~/.ssh/list`; do
+    ssh-add ~/.ssh/$id
+done
+
+echo "Installed keys:"
+ssh-add -l
+
+exit 0
