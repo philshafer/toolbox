@@ -1,0 +1,19 @@
+#!/bin/sh
+
+temp=/tmp/hold.$USER.$$
+out="${1:-/dev/stdout}"
+
+function cleanup() {
+    rm -f $temp
+}
+
+function ctrlc() {
+    exit 1
+}
+
+trap cleanup EXIT
+trap ctrlc SIGINT
+
+cat > $temp
+cat < $temp > $out
+exit $?
