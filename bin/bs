@@ -1,0 +1,239 @@
+#!/bin/sh
+
+THIS=$0
+
+BAAS="baas"
+BAASHOST=${BAASHOST:-baas}
+HOSTNAME=`hostname`
+case "$HOSTNAME" in
+    *baasshell*|editsb)
+	;;
+
+    *)
+	echo "[running via remote: $BAASHOST]"
+	BAAS="ssh -t $BAASHOST $BAAS"
+	;;
+esac
+
+case "$1" in
+    -n)
+	BAAS="echo $BAAS"
+	shift
+	;;
+esac
+
+op="$1"
+shift
+
+case "$1" in
+    "")
+	echo [no name]
+	name=
+	;;
+    -*)
+        echo [no name]
+	name=
+	;;
+
+    *)
+        echo "[volume $1]"
+	name="$1"
+	shift
+	;;
+esac
+
+must_have_name() {
+    if [ -z "$name" ]; then
+	echo "missing argument: must have a ${1:-name}"
+	exit 1
+    fi
+}
+
+mung_name() {
+    if [ ! -z "$name" ]; then
+        name="$1 $name"
+    fi
+}
+
+cmd() {
+    echo "+ $@"
+    "$@"
+}
+
+clean_pod_name() {
+    name=`echo $name | sed -e 's/^pod://' -e 's/\.$//'`
+}
+
+# Default to self-help
+if [ -z "$op" ]; then
+    op=self-help
+fi
+
+case "$op" in
+
+    # Volume-related commands::
+    new)
+	## bs new <volume> [opts]
+	## == create a new volume
+	must_have_name volume-name
+	cmd $BAAS createvol -s $name -z 1500Gi "$@"
+	;;
+
+    delete)
+	## bs delete <volume> [opts]
+	must_have_name volume-name
+	cmd $BAAS deletevol -s $name "$@"
+	;;
+
+    clone)
+	## bs clone <volume> [opts]
+	## == clone a pre-built sandbox
+	must_have_name volume-name
+	cmd $BAAS checkoutpbsb -s $name "$@"
+	;;
+
+    ls|l|vols|volumes)
+	## bs ls <volume> [opts]
+	## == display a list of volumes
+	cmd $BAAS list "$@"
+	;;
+
+    # POD-related commands::
+    bc)
+	## bs bc <volume> [opts]
+	## == start a large (aka 'buildcontainer') 'edit' container
+	must_have_name volume-name
+	cmd $BAAS edit -s "$name" -ip -m buildcontainer $@
+	;;
+
+    ed|edit)
+	## bs edit <volume> [opts]
+	## == start an 'edit' container
+	must_have_name volume-name
+	cmd $BAAS edit -s "$name" -p evo -ip "$@"
+	;;
+
+    start|unified)
+	## bs unified <volume> [opts]
+	## == start an magically unified 'edit' container
+	must_have_name volume-name
+	cmd $BAAS edit -s "$name" -unified -p evo -ip "$@"
+	;;
+
+    kill|stop)
+	## bs kill <pod>
+	## == destroy a pod
+	must_have_name pod-name
+	clean_pod_name
+	cmd $BAAS destroypod -n $name
+	;;
+
+    ps|pod|pods|lspod|lspods)
+	## bs pod [<podname>] [opts]
+	## == display a list of pods
+	mung_name -n
+	cmd $BAAS lspod $name "$@"
+	;;
+
+    dcb)
+	## bs dcb [<product>] [opts]
+	## == list pre-built sandboxes for the DEV_COMMON_BRANCH release
+	mung_name -p
+	cmd $BAAS lspbsb -r DEV_COMMON_BRANCH $name "$@"
+	;;
+
+    pre|lsp)
+	## bs pre [<release>] [opts]
+	## == list pre-built sandboxes
+	mung_name -r
+	cmd $BAAS lspbsb $name "$@"
+	;;
+
+    ll)
+	## bs ll [<volume>] [opts]
+	## == list detailed information about pods
+	mung_name -s
+	cmd $BAAS lspod -l $name "$@"
+	;;
+
+    # Build-related commands::
+    build)
+	## bs build <command> [opts]
+	## == start a build with the full command string
+	## == e.g. bs build "run-coverity -r xxx"
+	must_have_name command-string
+	cmd $BAAS build -b "$name" $@
+	;;
+
+    local|mk)
+	## bs mk [<target>] [opts]
+	## == start a build ('mk') for a specific target
+	## == (This command is only useful on a editsb container in a subdirectory of a sbox)
+	if [ -z "$name" ]; then
+	    name=mk
+	else
+	    name="mk $name"
+	fi
+	cmd $BAAS build -b "$name" -l "$@"
+	;;
+
+    host|mkh)
+	## bs host <target>
+	## == run 'mk-host' for a target
+	must_have_name target-name
+	cmd $BAAS build -b "mk-host $name" -l "$@"
+	;;
+
+    remote|rmk)
+	## bs remote <target> [opts]
+	## == start a build ('mk') for a specific target using a remote build machine
+	must_have_name target-name
+	cmd $BAAS build -b "mk $name" -x "$@"
+	;;
+
+    mach|machine)
+	## bs mach <machine> <volume>
+	## == start a build ('mk') using a specific machine target
+	## == e.g. bs mach xxx my-pod  ("mk-xxx my-pod")
+	must_have_name machine-name
+	targ="$1"
+	shift
+	if [ -z "$targ" ]; then
+	    echo missing argument: must have build-target
+	    exit 1
+	fi
+	cmd $BAAS build -b "mk-$name $targ" -l "$@"
+	;;
+
+    # Other commands::
+    status|stat|st)
+	## bs status [opts]
+	## == show status information
+	cmd $BAAS status "$@"
+	;;
+
+    help)
+	## bs help <command>
+	## == show help for a 'baas' command
+	cmd $BAAS $name "$@" -h
+	;;
+
+    self-help|--help)
+        echo " "
+	echo "bs: a better way to baas"
+	echo " bs [-n] <command> ..."
+        echo " "
+	echo "  list of supported verbs::"
+        echo " "
+	grep -B1 "#\#" $0 | sed -e 's/.*#\#/        /' -e 's/==/    /'
+        echo " "
+	;;
+
+    *)
+	## bs <command> [opts]
+	## == any other commands are passed through to 'baas'
+	cmd $BAAS "$op" $name "$@"
+	;;
+esac
+
+exit $?
