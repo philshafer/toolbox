@@ -23,6 +23,7 @@ use warnings;
 use Cwd qw(abs_path getcwd);
 use File::Basename;
 use POSIX qw(setsid);
+use POSIX qw(strftime);
 
 # 1. Early Check for sandbox-exec availability
 system("command -v sandbox-exec >/dev/null 2>&1");
@@ -313,8 +314,15 @@ sub run_claude {
     # Enforce safe process limit count
     system("ulimit -u 1024");
 
+    my $dir = $ENV{HOME} . "/.claude/logs";
+    mkdir($dir);
+    my $time = strftime("%Y%m%d-%H%M.%S", localtime);
+
+    my $file = $time . ".log";
+    my $path = $dir . "/" . $file;
+
     # Native exec replacement (replaces current perl thread)
-    exec("sandbox-exec", "-f", $profile_file, @args)
+    exec("script", $path, "sandbox-exec", "-f", $profile_file, @args)
         or die "Failed to execute sandbox-exec: $!";
 }
 
