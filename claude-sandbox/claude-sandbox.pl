@@ -109,6 +109,7 @@ sub _cksum_table {
 sub detect_package_paths {
     my @paths;
     push @paths, "/opt/homebrew"        if -d "/opt/homebrew";
+    push @paths, "/opt/local"        if -d "/opt/local";
     push @paths, "/usr/local/Homebrew"  if -d "/usr/local/Homebrew";
     push @paths, "$home_dir/.local"     if -d "$home_dir/.local";
     push @paths, "/nix/store"           if -d "/nix/store";
@@ -160,6 +161,8 @@ sub generate_profile {
   (subpath "/Applications/Xcode.app")
   (subpath "/Library/Developer")
   (subpath "__HOME__/Library/Developer")
+  (subpath "__HOME__/Library/Python")
+  (subpath "__HOME__/Library/Caches/pip")
   (subpath "/opt")
   (subpath "/private/etc")
   (subpath "/var/db/dyld")
@@ -175,8 +178,11 @@ __DETECTED_USER_PATHS__
   (subpath "/System")
   (subpath "/bin")
   (subpath "/sbin")
-  (subpath "__HOME__/bin")
   (subpath "__HOME__/.local")
+  (subpath "__HOME__/bin")
+  (subpath "__HOME__/bin/.toolbox")
+  (subpath "__HOME__/work/philshafer/toolbox")
+  (subpath "/Volumes/case/work/philshafer/toolbox")
   (literal "/usr/bin/env")
 __DETECTED_EXEC_PATHS__
 )
@@ -185,10 +191,16 @@ __DETECTED_EXEC_PATHS__
   (subpath "__HOME__/src")
 )
 
+(allow file-read*
+  (literal "__HOME__/.exrc")
+  (literal "__HOME__/.vimrc")
+)
+
 ;; ---------- work dirs ---------------------------------------------
 (allow file-read* file-write* process-exec
   (subpath "__HOME__/work/root")
   (subpath "/Volumes/case/work/root")
+  (subpath "__HOME__/patches/claude")
 )
 
 ;; ---------- temp dirs ---------------------------------------------
@@ -219,7 +231,12 @@ __DETECTED_EXEC_PATHS__
   (literal "/dev/dtracehelper")                               ;;
   (regex "^/dev/tty.*")                                       ;;
 )
-
+(allow file-ioctl file-read* file-write*
+  (subpath "/dev/fd")
+  (literal "/dev/stdin");
+  (literal "/dev/stdout");
+  (literal "/dev/stderr");
+)
 ;; ---------- mach-lookup services ---------------------------------
 (allow mach-lookup                                              ;;
   (global-name "com.apple.system.opendirectoryd.libinfo")
@@ -299,6 +316,8 @@ sub list_dotfiles {
     foreach (@l) {
 	next if /\/\.claude/;
 	next if /\/\.local/;
+	next if /\/\.exrc/;
+	next if /\/\.vimrc/;
 	$out .= "  (subpath \"$_\")\n";
     }
     return $out;
