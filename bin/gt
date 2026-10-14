@@ -128,8 +128,7 @@ amend_comments () {
 	echo $log
 
         /bin/echo "[Changing comment for $file into branch $branch]"
-        /bin/echo -n "Commit message: "
-	read comment
+	read -e -p "Commit message: " comment
 	if [ "$comment" = "==" -o  "$comment" = "=" -o "$comment" = "ditto" ]; then
 	    comment="$last"
         fi
@@ -216,8 +215,7 @@ case "$op" in
 	    opts=-a
 	fi
 
-        /bin/echo -n "Commit message: "
-	read comment
+	read -e -p "Comment message: " comment
 	if [ "$comment" = "" ]; then
 	    echo "Commit aborted"
 	else
