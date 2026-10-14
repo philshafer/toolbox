@@ -36,6 +36,7 @@ bin-files:
 	done
 
 INSTALL_TOOLS = \
+    install-bonnie \
     install-claude-sandbox \
     install-memdump \
     install-title \
@@ -43,25 +44,36 @@ INSTALL_TOOLS = \
 
 tools:  ${INSTALL_TOOLS}
 
-install-title: ${DESTDIR}/title
+#
+# Remove attributes
+remove-attr:
+	@echo before:
+	xattr ${FILE}
+	xattr -d com.apple.provenance ${FILE}
+	@echo after:
+	xattr ${FILE}
 
-${DESTDIR}/title: title/title.c ${FORCE}
-	cc -O -o ${DESTDIR}/title title/title.c
+# Things that needs symlinks
 
-install-ytplay: ${DESTDIR}/ytplay
-
-${DESTDIR}/ytplay: ytplay/ytplay.sh ${FORCE}
-	ln -s -f .toolbox/ytplay/ytplay.sh ${DESTDIR}/ytplay
-
-install-claude-sandbox: ${DESTDIR}/claude-sandbox
+install-bonnie: ${DESTDIR}/bonnie
+${DESTDIR}/bonnie: bonnie/bonnie.py ${FORCE}
+	ln -s -f .toolbox/bonnie/bonnie.py ${DESTDIR}/bonnie
 
 CSB = claude-sandbox
-
+install-claude-sandbox: ${DESTDIR}/${CSB}
 ${DESTDIR}/${CSB}: ${CSB}/${CSB}.pl ${FORCE}
 	ln -s -f .toolbox/${CSB}/${CSB}.pl ${DESTDIR}/${CSB}
 
-install-memdump: ${DESTDIR}/memdump
+install-ytplay: ${DESTDIR}/ytplay
+${DESTDIR}/ytplay: ytplay/ytplay.sh ${FORCE}
+	ln -s -f .toolbox/ytplay/ytplay.sh ${DESTDIR}/ytplay
 
+## Things that need compiled
+
+install-memdump: ${DESTDIR}/memdump
 ${DESTDIR}/memdump: memdump/memdump.c ${FORCE}
 	cc -O -DMAIN -o ${DESTDIR}/memdump memdump/memdump.c
 
+install-title: ${DESTDIR}/title
+${DESTDIR}/title: title/title.c ${FORCE}
+	cc -O -o ${DESTDIR}/title title/title.c
