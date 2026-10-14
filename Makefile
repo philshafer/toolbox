@@ -55,9 +55,9 @@ remove-attr:
 
 # Things that needs symlinks
 
-install-bonnie: ${DESTDIR}/bonnie
-${DESTDIR}/bonnie: bonnie/bonnie.py ${FORCE}
-	ln -s -f .toolbox/bonnie/bonnie.py ${DESTDIR}/bonnie
+install-bonnie: ${DESTDIR}/bonnie-log
+${DESTDIR}/bonnie-log: bonnie/bonnie-log.py ${FORCE}
+	ln -s -f .toolbox/bonnie/bonnie-log.py ${DESTDIR}/bonnie-log
 
 CSB = claude-sandbox
 install-claude-sandbox: ${DESTDIR}/${CSB}
