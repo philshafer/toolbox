@@ -194,6 +194,7 @@ __DETECTED_EXEC_PATHS__
 (allow file-read*
   (literal "__HOME__/.exrc")
   (literal "__HOME__/.vimrc")
+  (literal "__HOME__/.gitconfig")
 )
 
 ;; ---------- work dirs ---------------------------------------------
