@@ -1,0 +1,28 @@
+# ~/.claude-sandbox.conf -- user rules for claude-sandbox.pl
+#
+#   [+|-][rwxima] path [path ...]
+#   @rewrite from to
+#
+# r=read w=write x=exec i=ioctl m=map-executable a=all
+# "+" always includes "r"; a bare path means "+r".
+# "-" alone means "-a"; "-w" denies only writes.
+# Paths are relative to $HOME unless they start with "/", "~",
+# "$CWD", "$HOME" or "$TMPDIR".  Last matching rule wins.
+#
+# Everything under ~ is denied by default, so only allows are needed
+# here, plus denies to punch holes in an earlier allow.
+
+# ~/work is a symlink onto the case-sensitive volume
+@rewrite work/ /Volumes/case/work/
+
+# ---------- editor and git settings (read-only) -------------------
+.exrc .vimrc .gitconfig
+
+# ---------- developer tool caches ---------------------------------
++rxm Library/Developer Library/Python Library/Caches/pip
+
+# ---------- my tools ----------------------------------------------
++rx bin src work/philshafer/toolbox
+
+# ---------- work dirs ---------------------------------------------
++rwx work/root patches/claude
