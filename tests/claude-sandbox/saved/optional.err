@@ -1,0 +1,4 @@
+conf:1: environment variable "SB_UNSET" is not set
+Error: bad configuration, profile not generated
+conf:1: unterminated "${"
+Error: bad configuration, profile not generated
