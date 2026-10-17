@@ -6,9 +6,9 @@
 # r=read w=write x=exec i=ioctl m=map-executable a=all
 # "+" always includes "r"; a bare path means "+r".
 # "-" alone means "-a"; "-w" denies only writes.
-# Paths are relative to $HOME unless they start with "/", "~",
-# "$CWD", "$HOME" or "$TMPDIR".  Last matching rule wins.
-# "{FOO}" is an environment variable and "?${FOO}" uses FOO if it
+# Paths are relative to $HOME unless they start with "/" or "~".
+# "${CWD}" is the workspace.  Last matching rule wins.
+# "${FOO}" is an environment variable and "?${FOO}" uses FOO if it
 # is set and ignores that path otherwise.
 #
 # Everything under ~ is denied by default, so only allows are needed
