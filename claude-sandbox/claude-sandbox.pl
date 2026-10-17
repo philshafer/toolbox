@@ -31,19 +31,21 @@
 #   "+" always includes "r"; no option at all means "+r".
 #   "-" with no letters means "-a"; otherwise only the given letters.
 #
-#   Paths: "/..." is absolute, "$CWD", "$HOME", "$TMPDIR" and "~" expand,
-#   anything else is relative to $HOME.  Directories become "subpath",
-#   files "literal"; a trailing "/" forces subpath, a leading "=" forces
-#   literal.  Quote paths with spaces ("a b").  r"..." is a regex (no
-#   relative paths; $CWD/$HOME/$TMPDIR are substituted, escaped).
-#   "${NAME}" expands anywhere in a path or regex, from CWD/HOME/TMPDIR
-#   or the environment; an unset or empty variable is an error, unless
-#   the path starts with "?" (e.g. "+rwx ?${FOO}"), which drops it.
+#   Paths: "/..." is absolute, "~" is $HOME, anything else is relative
+#   to $HOME.  Directories become "subpath", files "literal"; a trailing
+#   "/" forces subpath, a leading "=" forces literal.  Quote paths with
+#   spaces ("a b").  r"..." is a regex (no relative paths).
+#   "${NAME}" expands anywhere in a path or regex (escaped in a regex)
+#   from the environment, plus "${CWD}" (the workspace); "${HOME}" and
+#   "${TMPDIR}" are normalized.  An unset or empty variable is an error,
+#   unless the path starts with "?" (e.g. "+rwx ?${FOO}"), which drops
+#   it.  "$" must be followed by "{" (use "\$" in quotes for a real "$"),
+#   except in a regex, where it is the usual end anchor.
 #   Symlinks are followed and every path in the chain is emitted.
 #   "@rewrite A B" adds B for every path under A, and vice versa.
 #
 #   Rule order (last match wins): system rules (including "-a ~"),
-#   "+rwxm $CWD", the conf file in order, then forced denies.
+#   "+rwxm ${CWD}", the conf file in order, then forced denies.
 #
 # Note: sandbox-exec(1) is deprecated but works on macOS 14 + 15 (June 2025).
 #-------------------------------------------------------------------------------
@@ -91,7 +93,7 @@ my $hex_hash     = sprintf("%x", $cksum);
 my $profile_name = "claude-sandbox-$base_name-$hex_hash";
 my $profile_file = "$tmp_dir/$profile_name.sb";
 
-# Variables usable at the start of conf paths (and inside regexes)
+# Built-in "${NAME}" variables, which take precedence over the environment
 my %VARS = (
     CWD    => norm_path($project_dir),
     HOME   => norm_path($home_dir),
@@ -293,7 +295,6 @@ sub var_value {
 sub expand_regex_vars {
     my ($rx) = @_;
     $rx =~ s/\$\{(\w+)\}/ere_escape(var_value($1))/ge;
-    $rx =~ s/\$(CWD|HOME|TMPDIR)\b/ere_escape($VARS{$1})/ge;
     return $rx;
 }
 
@@ -302,16 +303,10 @@ sub expand_regex_vars {
 sub resolve_conf_path {
     my ($v) = @_;
 
-    die "unterminated \"\${\"\n" if $v =~ /\$\{(?!\w+\})/;
     $v =~ s/\$\{(\w+)\}/var_value($1)/ge;
+    $v =~ s/\0/\$/g;            # "\$" from a quoted path
 
-    if ($v =~ m{^\$(\w+)(.*)$}) {
-        my ($name, $rest) = ($1, $2);
-        die "unknown variable \"\$$name\"\n" unless exists $VARS{$name};
-        die "\"\$$name\" must be followed by \"/\" or nothing\n"
-            unless $rest eq '' || $rest =~ m|^/|;
-        $v = $VARS{$name} . $rest;
-    } elsif ($v =~ m{^~(/.*)?$}) {
+    if ($v =~ m{^~(/.*)?$}) {
         $v = $home_dir . ($1 // '');
     } elsif ($v =~ m{^~}) {
         die "\"~user\" paths are not supported\n";
@@ -342,7 +337,8 @@ sub tokenize {
             $tok = { type => 'regex', value => $1 };
         } elsif ($s =~ s/^(=?)"((?:[^"\\]|\\.)*)"//) {
             my ($lit, $v) = ($1, $2);
-            $v =~ s/\\(.)/$1/g;
+            # "\$" is a real "$"; hide it from variable expansion
+            $v =~ s/\\(.)/$1 eq '$' ? "\0" : $1/ge;
             $tok = { type => 'path', value => $v, literal => $lit ne '' };
         } elsif ($s =~ s/^(=?)([^\s"]+)//) {
             $tok = { type => 'path', value => $2, literal => $1 ne '' };
@@ -351,12 +347,21 @@ sub tokenize {
         }
 
         die "missing whitespace after path\n" if $s ne '' && $s !~ /^\s/;
+        check_dollars($tok->{value}) if $tok->{type} eq 'path';
 
         $tok->{optional} = $opt;
         $tok->{raw} = substr($before, 0, length($before) - length($s));
         push @t, $tok;
     }
     return @t;
+}
+
+# In a path, "$" must start a well-formed "${NAME}"
+sub check_dollars {
+    my ($v) = @_;
+    die "unterminated \"\${\"\n" if $v =~ /\$\{(?!\w+\})/;
+    die "use \"\${$1}\" instead of \"\$$1\"\n" if $v =~ /\$(\w+)/;
+    die "\"\$\" must be followed by \"{\"\n" if $v =~ /\$(?!\{)/;
 }
 
 # For an optional ("?") token: why it should be skipped, if it should
@@ -574,7 +579,7 @@ sub build_rules {
     @rewrites = ();
 
     my @sys = parse_conf(system_conf(), 'system', \@errors);
-    my @cwd = parse_conf('+rwxm $CWD', 'cwd', \@errors);
+    my @cwd = parse_conf('+rwxm ${CWD}', 'cwd', \@errors);
 
     my @user;
     if (-e $conf_file) {
@@ -680,10 +685,10 @@ EOF
     $text .= <<'EOF';
 
 # ---------- temp dirs ---------------------------------------------
-+rw /tmp/ $TMPDIR/../
++rw /tmp/ ${TMPDIR}/../
 
 # ---------- Claude config & token files ---------------------------
-+rw ~/.claude/ r"^$HOME/\.claude\.json(\..*)?$"
++rw ~/.claude/ r"^${HOME}/\.claude\.json(\..*)?$"
 
 # ---------- time-zone & prefs (RO) --------------------------------
 +r /private/var/db/timezone/ /Library/Preferences/ ~/Library/Preferences/
@@ -707,8 +712,8 @@ sub forced_conf {
 # Quote a path for conf syntax, if needed
 sub conf_quote {
     my ($p) = @_;
-    return $p unless $p =~ /[\s"\\#]/;
-    $p =~ s/(["\\])/\\$1/g;
+    return $p unless $p =~ /[\s"\\#\$]/;
+    $p =~ s/(["\\\$])/\\$1/g;
     return "\"$p\"";
 }
 
