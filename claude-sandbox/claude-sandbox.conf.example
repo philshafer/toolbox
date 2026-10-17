@@ -8,6 +8,8 @@
 # "-" alone means "-a"; "-w" denies only writes.
 # Paths are relative to $HOME unless they start with "/", "~",
 # "$CWD", "$HOME" or "$TMPDIR".  Last matching rule wins.
+# "{FOO}" is an environment variable and "?${FOO}" uses FOO if it
+# is set and ignores that path otherwise.
 #
 # Everything under ~ is denied by default, so only allows are needed
 # here, plus denies to punch holes in an earlier allow.
@@ -26,3 +28,4 @@
 
 # ---------- work dirs ---------------------------------------------
 +rwx work/root patches/claude
++rwx ?${SB_DESTDIR}
