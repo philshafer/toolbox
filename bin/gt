@@ -86,16 +86,12 @@ git_diff () {
 MYHISTFILE=$HOME/.gt_history
 OLDHISTFILE=$HISTFILE
 
-#
-# bash readline support is good.  "read -e" is not, since it intermingles
-# "read" data with script data in a most annoying way.  So we go it alone...
-#
-
 check() {
      echo check: $1: `cksum $MYHISTFILE` 1>&2
      tail -2 $MYHISTFILE 1>&2
 }
 
+# decide if an answer needs to be recorded
 needs_recorded () {
     local test="$1"
 
@@ -107,12 +103,18 @@ needs_recorded () {
 	return 1
     fi
 
+    # avoid duplicate entries
     if grep -q '^'"${test}"'$' $MYHISTFILE ; then
 	return 1
     fi
 
     return 0
 }
+
+#
+# bash readline support is good.  "read -e" is not, since it intermingles
+# "read" data with script data in a most annoying way.  So we go it alone...
+#
 
 myreadline() {
     local prompt="$1" ; shift
@@ -124,17 +126,12 @@ myreadline() {
     history -c
     history -r
 
-    check pre-read
     read -e -p "$prompt" answer
-    check post-read
 
     HISTFILE=$OLDHISTFILE
-    check post-hist
 
     if needs_recorded "$answer" ; then
-	check pre-write
 	echo "$answer" >> $MYHISTFILE
-	check post-write
     fi
 
     echo $answer
