@@ -4,16 +4,46 @@
 #
 # https://raw.githubusercontent.com/paulsmith/claude-sandbox/refs/heads/main/claude-sandbox
 #
-# claude-sandbox  — run Claude Code inside a tighter macOS sandbox
-#
 # Copyright (c) 2025 Paul Smith <paulsmith@pobox.com>
 # SPDX-License-Identifier: MIT
 #
+# claude-sandbox -- run Claude Code inside a tighter macOS sandbox
+#
 #   claude-sandbox                # generate profile + run claude (default)
 #   claude-sandbox run [...args]  # same, pass args through
+#   claude-sandbox shell          # generate profile + run $SHELL
 #   claude-sandbox generate       # build the profile only
 #   claude-sandbox profile        # print last-generated profile path
+#   claude-sandbox check path...  # report which rule decides each access
 #   claude-sandbox help           # this text
+#
+#   claude-sandbox -f file ...    # use "file" instead of ~/.claude-sandbox.conf
+#   claude-sandbox -x ...         # extra-verbose: one rule line per path
+#
+# User rules live in ~/.claude-sandbox.conf:
+#
+#   # comment (copied into the profile as ";;")
+#   [+|-][rwxima] path [path ...]
+#   @rewrite from to
+#
+#   r=file-read*  w=file-write*  x=process-exec  i=file-ioctl
+#   m=file-map-executable  a=all of them
+#   "+" always includes "r"; no option at all means "+r".
+#   "-" with no letters means "-a"; otherwise only the given letters.
+#
+#   Paths: "/..." is absolute, "$CWD", "$HOME", "$TMPDIR" and "~" expand,
+#   anything else is relative to $HOME.  Directories become "subpath",
+#   files "literal"; a trailing "/" forces subpath, a leading "=" forces
+#   literal.  Quote paths with spaces ("a b").  r"..." is a regex (no
+#   relative paths; $CWD/$HOME/$TMPDIR are substituted, escaped).
+#   "${NAME}" expands anywhere in a path or regex, from CWD/HOME/TMPDIR
+#   or the environment; an unset or empty variable is an error, unless
+#   the path starts with "?" (e.g. "+rwx ?${FOO}"), which drops it.
+#   Symlinks are followed and every path in the chain is emitted.
+#   "@rewrite A B" adds B for every path under A, and vice versa.
+#
+#   Rule order (last match wins): system rules (including "-a ~"),
+#   "+rwxm $CWD", the conf file in order, then forced denies.
 #
 # Note: sandbox-exec(1) is deprecated but works on macOS 14 + 15 (June 2025).
 #-------------------------------------------------------------------------------
@@ -22,7 +52,6 @@ use strict;
 use warnings;
 use Cwd qw(abs_path getcwd);
 use File::Basename;
-use POSIX qw(setsid);
 use POSIX qw(strftime);
 
 # 1. Early Check for sandbox-exec availability
@@ -36,6 +65,24 @@ if ($? != 0) {
 my $project_dir  = abs_path(getcwd());
 my $home_dir     = $ENV{HOME};
 my $tmp_dir      = $ENV{TMPDIR} || '/tmp';
+my $conf_file    = "$home_dir/.claude-sandbox.conf";
+
+my $one_per_line = 0;  # -x: one "(allow ...)" line per path
+
+# Leading options, before the command
+while (@ARGV && ($ARGV[0] eq '-f' || $ARGV[0] eq '-x')) {
+    my $opt = shift @ARGV;
+    if ($opt eq '-x') {
+        $one_per_line = 1;
+        next;
+    }
+    unless (@ARGV) {
+        print STDERR "Error: -f needs a config file argument\n";
+        exit 1;
+    }
+    $conf_file = shift @ARGV;
+    $conf_file = getcwd() . "/$conf_file" unless $conf_file =~ m|^/|;
+}
 
 my $base_name    = basename($project_dir);
 my $cksum        = POSIX_cksum($project_dir);
@@ -43,6 +90,32 @@ my $hex_hash     = sprintf("%x", $cksum);
 
 my $profile_name = "claude-sandbox-$base_name-$hex_hash";
 my $profile_file = "$tmp_dir/$profile_name.sb";
+
+# Variables usable at the start of conf paths (and inside regexes)
+my %VARS = (
+    CWD    => norm_path($project_dir),
+    HOME   => norm_path($home_dir),
+    TMPDIR => norm_path($tmp_dir),
+);
+
+# Permission letters, in emit order, and their sandbox operations.
+# "M" (file-read-metadata) is internal: implied by "r", and used for
+# the stat-only allows emitted for parent directories.
+my $CATS = 'rwxim';
+my %CAT_OP = (
+    r => 'file-read*',
+    w => 'file-write*',
+    x => 'process-exec',
+    i => 'file-ioctl',
+    m => 'file-map-executable',
+    M => 'file-read-metadata',
+);
+my %CAT_NAME = (
+    M => 'stat', r => 'read', w => 'write', x => 'exec',
+    i => 'ioctl', m => 'map-exec',
+);
+
+my @rewrites;           # [from, to] pairs, from @rewrite directives
 
 # 3. Command dispatcher
 my $cmd = shift @ARGV || 'run';
@@ -54,24 +127,30 @@ if ($cmd eq 'shell') {
     print "$profile_file\n";
 } elsif ($cmd eq 'profile') {
     print "$profile_file\n";
-} elsif ($cmd eq 'dotfiles') {
-    print list_dotfiles();
+} elsif ($cmd eq 'check') {
+    check_paths(@ARGV);
 } elsif ($cmd eq 'help' || $cmd eq '-h' || $cmd eq '--help') {
     usage();
-} else {
+} elsif ($cmd eq 'claude') {
     run_claude("claude", @ARGV);
+} elsif ($cmd eq 'run') {
+    run_claude("claude", @ARGV);
+} else {
+    run_claude("claude", $cmd, @ARGV);
 }
 
 # --- Functions ---
 
 sub usage {
-    # Open itself to parse and print the top comment block lines directly
+    # Print the top comment block, from the title line to the dashes
     open(my $fh, '<', $0) or die "Cannot open script: $!";
+    my $on = 0;
     while (my $line = <$fh>) {
-        last if $. > 15; # Optimization check
-        if ($line =~ /^#\s?({0,1}.*)/) {
-            print "$1\n";
-        }
+        $on = 1 if $line =~ /^# claude-sandbox /;
+        last if $line =~ /^#-{10}/;
+        next unless $on;
+        $line =~ s/^# ?//;
+        print $line;
     }
     close($fh);
 }
@@ -106,140 +185,607 @@ sub _cksum_table {
     return $crc;
 }
 
-sub detect_package_paths {
-    my @paths;
-    push @paths, "/opt/homebrew"        if -d "/opt/homebrew";
-    push @paths, "/opt/local"        if -d "/opt/local";
-    push @paths, "/usr/local/Homebrew"  if -d "/usr/local/Homebrew";
-    push @paths, "$home_dir/.local"     if -d "$home_dir/.local";
-    push @paths, "/nix/store"           if -d "/nix/store";
-    return @paths;
+#-------------------------------------------------------------------------------
+# Path helpers
+
+# Textual cleanup: collapse "//", drop "/./", fold "..", strip trailing "/"
+sub norm_path {
+    my ($p) = @_;
+    my @out;
+    foreach my $c (split m|/|, $p) {
+        next if $c eq '' || $c eq '.';
+        if ($c eq '..') {
+            pop @out;
+        } else {
+            push @out, $c;
+        }
+    }
+    return '/' . join('/', @out);
+}
+
+# Follow symlinks one at a time, leftmost first, returning every path
+# in the chain: /foo -> /tmp/foo -> /private/tmp/foo
+sub expand_links {
+    my ($path) = @_;
+    my @out = ($path);
+    my $cur = $path;
+
+    for (1 .. 32) {
+        my @c = split m|/|, $cur;
+        my $prefix = '';
+        my $next;
+
+        for my $i (1 .. $#c) {
+            $prefix .= "/$c[$i]";
+            next unless -l $prefix;
+            my $target = readlink($prefix);
+            last unless defined $target;
+            $target = dirname($prefix) . "/$target" unless $target =~ m|^/|;
+            my $rest = join('/', @c[$i + 1 .. $#c]);
+            $next = norm_path($target . (length($rest) ? "/$rest" : ''));
+            last;
+        }
+
+        last unless defined $next;
+        last if grep { $_ eq $next } @out;      # symlink loop
+        push @out, $next;
+        $cur = $next;
+    }
+    return @out;
+}
+
+# Apply @rewrite pairs, in both directions
+sub apply_rewrites {
+    my (@paths) = @_;
+    my @out;
+    foreach my $p (@paths) {
+        push @out, $p;
+        foreach my $rw (@rewrites) {
+            foreach my $dir ([$rw->[0], $rw->[1]], [$rw->[1], $rw->[0]]) {
+                my ($from, $to) = @$dir;
+                if ($p eq $from || index($p, "$from/") == 0) {
+                    push @out, $to . substr($p, length($from));
+                }
+            }
+        }
+    }
+    my %seen;
+    return grep { !$seen{$_}++ } @out;
+}
+
+# Escape a string for use inside a POSIX extended regex
+sub ere_escape {
+    my ($s) = @_;
+    $s =~ s/([.\[\]()*+?{}|^\$\\])/\\$1/g;
+    return $s;
+}
+
+# Apply @rewrite pairs to a regex that starts with "^<path>"
+sub apply_regex_rewrites {
+    my ($rx) = @_;
+    my @out = ($rx);
+    foreach my $rw (@rewrites) {
+        foreach my $dir ([$rw->[0], $rw->[1]], [$rw->[1], $rw->[0]]) {
+            my ($from, $to) = @$dir;
+            my $efrom = '^' . ere_escape($from);
+            next unless index($rx, $efrom) == 0;
+            my $next = substr($rx, length($efrom), 1);
+            next unless $next eq '' || $next eq '/' || $next eq '$'
+                || $next eq '(';
+            push @out, '^' . ere_escape($to) . substr($rx, length($efrom));
+        }
+    }
+    my %seen;
+    return grep { !$seen{$_}++ } @out;
+}
+
+# Value of "${NAME}": our own variables first, then the environment
+sub var_value {
+    my ($name) = @_;
+    return $VARS{$name} if exists $VARS{$name};
+    die "environment variable \"$name\" is not set\n"
+        unless defined $ENV{$name};
+    die "environment variable \"$name\" is empty\n" if $ENV{$name} eq '';
+    return $ENV{$name};
+}
+
+# Expand "${NAME}" anywhere in a regex, escaping the value
+sub expand_regex_vars {
+    my ($rx) = @_;
+    $rx =~ s/\$\{(\w+)\}/ere_escape(var_value($1))/ge;
+    $rx =~ s/\$(CWD|HOME|TMPDIR)\b/ere_escape($VARS{$1})/ge;
+    return $rx;
+}
+
+# Turn a conf path token into an absolute path; dies on error.
+# Returns (path, forced-subpath)
+sub resolve_conf_path {
+    my ($v) = @_;
+
+    die "unterminated \"\${\"\n" if $v =~ /\$\{(?!\w+\})/;
+    $v =~ s/\$\{(\w+)\}/var_value($1)/ge;
+
+    if ($v =~ m{^\$(\w+)(.*)$}) {
+        my ($name, $rest) = ($1, $2);
+        die "unknown variable \"\$$name\"\n" unless exists $VARS{$name};
+        die "\"\$$name\" must be followed by \"/\" or nothing\n"
+            unless $rest eq '' || $rest =~ m|^/|;
+        $v = $VARS{$name} . $rest;
+    } elsif ($v =~ m{^~(/.*)?$}) {
+        $v = $home_dir . ($1 // '');
+    } elsif ($v =~ m{^~}) {
+        die "\"~user\" paths are not supported\n";
+    }
+
+    $v = "$home_dir/$v" unless $v =~ m|^/|;
+    my $sub = ($v =~ m|./$|) ? 1 : 0;
+    return (norm_path($v), $sub);
+}
+
+#-------------------------------------------------------------------------------
+# Conf parsing
+
+# Split the rest of a line into path tokens
+sub tokenize {
+    my ($s) = @_;
+    my @t;
+
+    while (1) {
+        $s =~ s/^\s+//;
+        last if $s eq '' || $s =~ /^#/;
+
+        my $before = $s;
+        my $opt = ($s =~ s/^\?//) ? 1 : 0;
+        my $tok;
+
+        if ($s =~ s/^r"((?:[^"\\]|\\.)*)"//) {
+            $tok = { type => 'regex', value => $1 };
+        } elsif ($s =~ s/^(=?)"((?:[^"\\]|\\.)*)"//) {
+            my ($lit, $v) = ($1, $2);
+            $v =~ s/\\(.)/$1/g;
+            $tok = { type => 'path', value => $v, literal => $lit ne '' };
+        } elsif ($s =~ s/^(=?)([^\s"]+)//) {
+            $tok = { type => 'path', value => $2, literal => $1 ne '' };
+        } else {
+            die "unterminated quote\n";
+        }
+
+        die "missing whitespace after path\n" if $s ne '' && $s !~ /^\s/;
+
+        $tok->{optional} = $opt;
+        $tok->{raw} = substr($before, 0, length($before) - length($s));
+        push @t, $tok;
+    }
+    return @t;
+}
+
+# For an optional ("?") token: why it should be skipped, if it should
+# (some "${NAME}" it uses is unset or empty).  Returns a list of reasons.
+sub skip_reasons {
+    my ($tok) = @_;
+    return () unless $tok->{optional};
+
+    my @why;
+    my $v = $tok->{value};
+    while ($v =~ /\$\{(\w+)\}/g) {
+        my $name = $1;
+        next if exists $VARS{$name};
+        if (!defined $ENV{$name}) {
+            push @why, "$name not set";
+        } elsif ($ENV{$name} eq '') {
+            push @why, "$name is empty";
+        }
+    }
+    my %seen;
+    return grep { !$seen{$_}++ } @why;
+}
+
+# Drop the optional tokens that should be skipped; returns the kept
+# tokens and a list of "token (reason)" strings for the skipped ones
+sub drop_skipped {
+    my (@t) = @_;
+    my (@keep, @skipped);
+    foreach my $tok (@t) {
+        my @why = skip_reasons($tok);
+        if (@why) {
+            push @skipped, "$tok->{raw} (" . join(', ', @why) . ")";
+        } else {
+            push @keep, $tok;
+        }
+    }
+    return (\@keep, \@skipped);
+}
+
+# Parse conf text into entries: comments and unresolved rules.
+# @rewrite directives are collected into @rewrites as a side effect.
+sub parse_conf {
+    my ($text, $label, $errors) = @_;
+    my @entries;
+    my $lineno = 0;
+
+    foreach my $line (split /\n/, $text) {
+        $lineno++;
+        my $src = "$label:$lineno";
+        $line =~ s/^\s+//;
+        $line =~ s/\s+$//;
+
+        if ($line eq '') {
+            push @entries, { kind => 'blank' };
+            next;
+        }
+
+        if ($line =~ /^#\s?(.*)$/) {
+            push @entries, { kind => 'comment', text => $1 };
+            next;
+        }
+
+        my $ok = eval {
+            if ($line =~ /^@(\S*)\s*(.*)$/) {
+                my ($dir, $rest) = ($1, $2);
+                die "unknown directive \"\@$dir\"\n" unless $dir eq 'rewrite';
+                my @t = tokenize($rest);
+                die "\@rewrite needs exactly two paths\n" unless @t == 2;
+                die "\@rewrite takes plain paths\n"
+                    if grep { $_->{type} ne 'path' || $_->{literal} } @t;
+
+                my ($keep, $skipped) = drop_skipped(@t);
+                if (@$skipped) {
+                    push @entries, { kind => 'comment',
+                        text => "$src: $line\n;;   skipped: "
+                            . join("\n;;   skipped: ", @$skipped) };
+                    return 1;
+                }
+
+                my ($from) = resolve_conf_path($t[0]{value});
+                my ($to) = resolve_conf_path($t[1]{value});
+                push @rewrites, [$from, $to];
+                push @entries, { kind => 'comment', text => "$src: $line" };
+                return 1;
+            }
+
+            my ($sign, $letters, $rest) = ('+', '', $line);
+            if ($line =~ /^([+-])(\S*)\s*(.*)$/) {
+                ($sign, $letters, $rest) = ($1, $2, $3);
+                foreach my $c (split //, $letters) {
+                    die "unknown option letter \"$c\"\n"
+                        unless index('rwxima', $c) >= 0;
+                }
+            }
+
+            my %cats;
+            if ($letters =~ /a/ || ($sign eq '-' && $letters eq '')) {
+                $cats{$_} = 1 foreach split //, $CATS;
+            } else {
+                $cats{$_} = 1 foreach split //, $letters;
+                $cats{r} = 1 if $sign eq '+';
+            }
+            $cats{M} = 1 if $cats{r};
+
+            my @t = tokenize($rest);
+            die "no paths given\n" unless @t;
+
+            my ($keep, $skipped) = drop_skipped(@t);
+            @t = @$keep;
+
+            # Every path was optional and skipped: leave a trace
+            unless (@t) {
+                push @entries, { kind => 'comment',
+                    text => "$src: $line\n;;   skipped: "
+                        . join("\n;;   skipped: ", @$skipped) };
+                return 1;
+            }
+
+            foreach my $tok (@t) {
+                if ($tok->{type} eq 'regex') {
+                    $tok->{value} = expand_regex_vars($tok->{value});
+                } else {
+                    ($tok->{path}, $tok->{subpath})
+                        = resolve_conf_path($tok->{value});
+                }
+            }
+
+            push @entries, {
+                kind => 'rule',
+                verb => $sign eq '+' ? 'allow' : 'deny',
+                cats => \%cats,
+                tokens => \@t,
+                skipped => $skipped,
+                src => $src,
+                text => $line,
+            };
+            return 1;
+        };
+
+        unless ($ok) {
+            my $msg = $@;
+            chomp $msg;
+            push @$errors, "$src: $msg";
+        }
+    }
+    return @entries;
+}
+
+#-------------------------------------------------------------------------------
+# Rule building and evaluation
+
+sub filter_match {
+    my ($f, $p) = @_;
+    my $v = $f->{value};
+    return 1 if $f->{type} eq 'all';
+    return $p eq $v if $f->{type} eq 'literal';
+    if ($f->{type} eq 'subpath') {
+        return 1 if $v eq '/';
+        return $p eq $v || index($p, "$v/") == 0;
+    }
+    if ($f->{type} eq 'regex') {
+        my $r = eval { $p =~ /$v/ };
+        return $r ? 1 : 0;
+    }
+    return 0;
+}
+
+# Last matching rule wins; returns (verb, rule-or-undef)
+sub decide {
+    my ($rules, $cat, $path) = @_;
+    my ($verb, $who) = ('deny', undef);
+    foreach my $r (@$rules) {
+        next unless $r->{cats}{$cat};
+        next unless grep { filter_match($_, $path) } @{$r->{filters}};
+        ($verb, $who) = ($r->{verb}, $r);
+    }
+    return ($verb, $who);
+}
+
+# Turn a parsed rule's tokens into sandbox filters
+sub make_filters {
+    my ($tokens) = @_;
+    my @filters;
+
+    foreach my $tok (@$tokens) {
+        if ($tok->{type} eq 'regex') {
+            push @filters, { type => 'regex', value => $_ }
+                foreach apply_regex_rewrites($tok->{value});
+            next;
+        }
+
+        my $path = $tok->{path};
+        my ($type, $note);
+        if ($tok->{literal}) {
+            $type = 'literal';
+        } elsif ($tok->{subpath} || -d $path) {
+            $type = 'subpath';
+        } elsif (-e $path) {
+            $type = 'literal';
+        } else {
+            $type = 'subpath';
+            $note = 'does not exist';
+        }
+
+        foreach my $p (apply_rewrites(expand_links($path))) {
+            push @filters, { type => $type, value => $p, note => $note };
+        }
+    }
+    return @filters;
+}
+
+# Build the full, ordered rule list
+sub build_rules {
+    my @errors;
+    @rewrites = ();
+
+    my @sys = parse_conf(system_conf(), 'system', \@errors);
+    my @cwd = parse_conf('+rwxm $CWD', 'cwd', \@errors);
+
+    my @user;
+    if (-e $conf_file) {
+        open(my $fh, '<', $conf_file) or die "Cannot open $conf_file: $!\n";
+        my $text = do { local $/; <$fh> };
+        close($fh);
+        @user = parse_conf($text, 'conf', \@errors);
+    } else {
+        print STDERR "Note: $conf_file not found; using system rules only\n";
+    }
+
+    my @forced = parse_conf(forced_conf(), 'forced', \@errors);
+
+    if (@errors) {
+        print STDERR "$_\n" foreach @errors;
+        die "Error: bad configuration, profile not generated\n";
+    }
+
+    my @rules = ({
+        kind => 'rule',
+        verb => 'allow',
+        cats => { M => 1 },
+        filters => [{ type => 'all' }],
+        src => 'system',
+        text => 'stat anything not denied below',
+    });
+
+    foreach my $e (@sys, @cwd, @user, @forced) {
+        if ($e->{kind} ne 'rule') {
+            push @rules, $e;
+            next;
+        }
+
+        $e->{filters} = [make_filters($e->{tokens})];
+
+        # Parent directories that are now hidden need stat access, or
+        # realpath(), getcwd() and friends fail on the way down
+        my @parents;
+        if ($e->{verb} eq 'allow') {
+            my %seen;
+            foreach my $f (@{$e->{filters}}) {
+                next if $f->{type} eq 'regex';
+                my $p = $f->{value};
+                while ($p ne '/') {
+                    $p = dirname($p);
+                    next if $seen{$p}++;
+                    my ($verb) = decide(\@rules, 'M', $p);
+                    push @parents, $p if $verb eq 'deny';
+                }
+            }
+        }
+
+        push @rules, $e;
+
+        if (@parents) {
+            push @rules, {
+                kind => 'rule',
+                verb => 'allow',
+                cats => { M => 1 },
+                filters => [map { { type => 'literal', value => $_ } }
+                            reverse @parents],
+                src => $e->{src},
+                text => 'parent directories (stat only)',
+            };
+        }
+    }
+    return @rules;
+}
+
+# The implicit system rules, in conf syntax
+sub system_conf {
+    my @opt;
+    foreach my $p ("/Applications/Xcode.app", "/Library/Developer",
+                   "/opt/homebrew", "/opt/local", "/usr/local/Homebrew",
+                   "/nix/store", "~/.local") {
+        my ($abs) = resolve_conf_path($p);
+        push @opt, conf_quote($p) if -d $abs;
+    }
+
+    # Wherever the claude binary really lives
+    my $claude_dir;
+    foreach my $dir (split /:/, $ENV{PATH} || '') {
+        next unless $dir =~ m|^/| && -x "$dir/claude";
+        my @chain = expand_links(norm_path("$dir/claude"));
+        $claude_dir = dirname($chain[-1]);
+        last;
+    }
+
+    my $text = <<'EOF';
+
+# ---------- basic dir traversal -----------------------------------
++r =/ =/private
+
+# ---------- hide everything in ~ unless allowed below -------------
+-a ~
+
+# ---------- system runtime ----------------------------------------
++rxm /System /usr /bin /sbin /Library/Frameworks /opt /private/etc /var/db/dyld
+EOF
+    $text .= "+rxm @opt\n" if @opt;
+    $text .= "\n# ---------- claude binary -----------------------------------------\n"
+        . "+rxm " . conf_quote("$claude_dir/") . "\n" if $claude_dir;
+    $text .= <<'EOF';
+
+# ---------- temp dirs ---------------------------------------------
++rw /tmp/ $TMPDIR/../
+
+# ---------- Claude config & token files ---------------------------
++rw ~/.claude/ r"^$HOME/\.claude\.json(\..*)?$"
+
+# ---------- time-zone & prefs (RO) --------------------------------
++r /private/var/db/timezone/ /Library/Preferences/ ~/Library/Preferences/
+
+# ---------- /dev access -------------------------------------------
++r =/dev
++rw r"^/dev/(tty.*|null|zero|dtracehelper)"
++i =/dev/dtracehelper r"^/dev/tty.*"
++rwi /dev/fd/ =/dev/stdin =/dev/stdout =/dev/stderr
+EOF
+    return $text;
+}
+
+# Denies that come after the user's conf, so it cannot undo them
+sub forced_conf {
+    return "\n# ---------- forced denies (not overridable) ----------------------\n"
+        . "-w =" . conf_quote($conf_file) . "\n"
+        . "-a ~/.ssh ~/.gnupg\n";
+}
+
+# Quote a path for conf syntax, if needed
+sub conf_quote {
+    my ($p) = @_;
+    return $p unless $p =~ /[\s"\\#]/;
+    $p =~ s/(["\\])/\\$1/g;
+    return "\"$p\"";
+}
+
+#-------------------------------------------------------------------------------
+# Profile generation
+
+# Quote a string for SBPL
+sub sb_str {
+    my ($s) = @_;
+    $s =~ s/(["\\])/\\$1/g;
+    return "\"$s\"";
+}
+
+sub emit_rule {
+    my ($r) = @_;
+    my @ops;
+    foreach my $c (split //, $CATS) {
+        push @ops, $CAT_OP{$c} if $r->{cats}{$c};
+    }
+    push @ops, $CAT_OP{M} if $r->{cats}{M} && !$r->{cats}{r};
+
+    my $out = ";; $r->{src}: $r->{text}\n";
+    $out .= ";;   skipped: $_\n" foreach @{$r->{skipped} || []};
+    my @f = grep { $_->{type} ne 'all' } @{$r->{filters}};
+    unless (@f) {
+        return $out . "($r->{verb} @ops)\n";
+    }
+
+    if ($one_per_line) {
+        foreach my $f (@f) {
+            $out .= "($r->{verb} @ops ($f->{type} " . sb_str($f->{value}) . "))";
+            $out .= "    ;; $f->{note}" if $f->{note};
+            $out .= "\n";
+        }
+        return $out;
+    }
+
+    $out .= "($r->{verb} @ops\n";
+    foreach my $f (@f) {
+        $out .= "  ($f->{type} " . sb_str($f->{value}) . ")";
+        $out .= "    ;; $f->{note}" if $f->{note};
+        $out .= "\n";
+    }
+    return $out . ")\n";
 }
 
 sub generate_profile {
-    my @detected_paths = detect_package_paths();
+    my @rules = build_rules();
+    my $now = strftime("%Y-%m-%d %H:%M:%S", localtime);
 
-    # Build substitution content safely using arrays
-    my $read_paths = "";
-    my $exec_paths = "";
-    my $user_paths = "";
-
-    foreach my $path (@detected_paths) {
-        $read_paths .= "  (subpath \"$path\")\n";
-        $exec_paths .= "  (subpath \"$path\")\n";
-        if ($path =~ m|/\.local$|) {
-            $user_paths .= "(allow file-read*\n  (subpath \"$path\")\n)\n";
-        }
-    }
-
-    # Default comment if no user binaries are found
-    $user_paths = ";; No user package paths detected\n" if $user_paths eq "";
-
-    # Raw template containing your layout markers
-    my $template = <<'EOF';
+    my $out = <<EOF;
 ;; ------------------------------------------------------------------
 ;;  Claude Code macOS sandbox profile (autogenerated)
+;;  generated: $now
+;;  workspace: $project_dir
+;;  config:    $conf_file
 ;; ------------------------------------------------------------------
 (version 1)
 (deny default)
 
-;; ---------- introspection & sysctl --------------------------------
-(allow file-read-metadata)
 (allow sysctl-read)
+EOF
 
-;; ---------- basic dir traversal -----------------------------------
-(allow file-read* (literal "/"))
-(allow file-read* (literal "/private"))
+    foreach my $r (@rules) {
+        if ($r->{kind} eq 'blank') {
+            $out .= "\n";
+        } elsif ($r->{kind} eq 'comment') {
+            $out .= ";; $r->{text}\n";
+        } else {
+            $out .= emit_rule($r);
+        }
+    }
 
-;; ---------- system runtime (read-only) ----------------------------
-(allow file-read* file-map-executable process-exec
-  (subpath "/System")
-  (subpath "/usr")
-  (subpath "/bin")
-  (subpath "/sbin")
-  (subpath "/Library/Frameworks")
-  (subpath "/Applications/Xcode.app")
-  (subpath "/Library/Developer")
-  (subpath "__HOME__/Library/Developer")
-  (subpath "__HOME__/Library/Python")
-  (subpath "__HOME__/Library/Caches/pip")
-  (subpath "/opt")
-  (subpath "/private/etc")
-  (subpath "/var/db/dyld")
-__DETECTED_READ_PATHS__
-)
+    $out .= <<'EOF';
 
-;; ---------- global npm/pipx/cargo bins ----------------------------
-__DETECTED_USER_PATHS__
-
-;; ---------- executable paths --------------------------------------
-(allow process-exec file-read*
-  (subpath "/usr")
-  (subpath "/System")
-  (subpath "/bin")
-  (subpath "/sbin")
-  (subpath "__HOME__/.local")
-  (subpath "__HOME__/bin")
-  (subpath "__HOME__/bin/.toolbox")
-  (subpath "__HOME__/work/philshafer/toolbox")
-  (subpath "/Volumes/case/work/philshafer/toolbox")
-  (literal "/usr/bin/env")
-__DETECTED_EXEC_PATHS__
-)
-
-(allow process-exec file-read*
-  (subpath "__HOME__/src")
-)
-
-(allow file-read*
-  (literal "__HOME__/.exrc")
-  (literal "__HOME__/.vimrc")
-  (literal "__HOME__/.gitconfig")
-)
-
-;; ---------- work dirs ---------------------------------------------
-(allow file-read* file-write* process-exec
-  (subpath "__HOME__/work/root")
-  (subpath "/Volumes/case/work/root")
-  (subpath "__HOME__/patches/claude")
-)
-
-;; ---------- temp dirs ---------------------------------------------
-(allow file-read* file-write*
-  (subpath "/tmp")
-  (subpath "/private/tmp")
-  (subpath "/private/var/folders")
-)
-
-;; ---------- Claude config & token files ---------------------------
-(allow file-read* file-write*
-  (subpath "__HOME__/.claude")            ;; dir
-  (literal "__HOME__/.claude.json")       ;; single file
-)
-
-;; ---------- time-zone & prefs (RO) --------------------------------
-(allow file-read*
-  (subpath "/private/var/db/timezone")    ;; tzdata
-  (subpath "/Library/Preferences")        ;; plists
-)
-
-;; ---------- /dev access (RO) + ioctl ------------------------------
-(allow file-read* (literal "/dev"))                           ;;
-(allow file-read* file-write*
-  (regex "^/dev/(tty.*|null|zero|dtracehelper)")
-)
-(allow file-ioctl
-  (literal "/dev/dtracehelper")                               ;;
-  (regex "^/dev/tty.*")                                       ;;
-)
-(allow file-ioctl file-read* file-write*
-  (subpath "/dev/fd")
-  (literal "/dev/stdin");
-  (literal "/dev/stdout");
-  (literal "/dev/stderr");
-)
 ;; ---------- mach-lookup services ---------------------------------
-(allow mach-lookup                                              ;;
+(allow mach-lookup
   (global-name "com.apple.system.opendirectoryd.libinfo")
   (global-name "com.apple.SystemConfiguration.DNSConfiguration")
   (global-name "com.apple.coreservices.launchservicesd")
@@ -254,36 +800,12 @@ __DETECTED_EXEC_PATHS__
 
 ;; ---------- Launch Services needed by /usr/bin/open --------------
 (allow mach-lookup
-  (regex "^com\\.apple\\.lsd(\\..*)?$")                   ;; lsd + its mapdb / modifydb helpers
+  (regex "^com\\.apple\\.lsd(\\..*)?$")   ;; lsd + its mapdb / modifydb helpers
 )
 
 ;; ---------- Notification Center shared-memory (RO) ---------------
 (allow ipc-posix-shm-read-data
   (ipc-posix-name "apple.shm.notification_center")
-)
-
-;; ---------- User-level preference reads (RO) ---------------------
-(allow file-read*
-  (subpath "__HOME__/Library/Preferences")
-)
-
-;; ---------- explicit sensitive DENY list --------------------------
-(deny file-read* file-write*
-  (subpath "__HOME__/Documents")
-  (subpath "__HOME__/Desktop")
-  (subpath "__HOME__/Downloads")
-  (subpath "__HOME__/Pictures")
-  (subpath "__HOME__/Movies")
-  (subpath "__HOME__/Music")
-  __DOTFILES__
-)
-
-;; ---------- project workspace (RW) --------------------------------
-(allow file-read* file-write* file-map-executable
-  (subpath "__PROJECT_DIR__")
-)
-(allow process-exec
-  (subpath "__PROJECT_DIR__")
 )
 
 ;; ---------- networking --------------------------------------------
@@ -293,46 +815,46 @@ __DETECTED_EXEC_PATHS__
 (allow lsopen)
 EOF
 
-    my $dotfiles = list_dotfiles();
-
-    # Clean multi-line interpolation natively without sed
-    $template =~ s/__PROJECT_DIR__/$project_dir/g;
-    $template =~ s/__HOME__/$home_dir/g;
-    $template =~ s/__DETECTED_READ_PATHS__/$read_paths/g;
-    $template =~ s/__DETECTED_EXEC_PATHS__/$exec_paths/g;
-    $template =~ s/__DETECTED_USER_PATHS__/$user_paths/g;
-    $template =~ s/__DOTFILES__/$dotfiles/g;
-
-    # Write out the clean profile layout
-    open(my $out, '>', $profile_file) or die "Cannot create profile file: $!";
-    print $out $template;
-    close($out);
+    open(my $fh, '>', $profile_file) or die "Cannot create profile file: $!";
+    print $fh $out;
+    close($fh);
 }
 
-sub list_dotfiles {
-    my $list=`ls -d $home_dir/.???*`;
-    my $out = "";
-    my (@l) = split(/\n/, $list);
+#-------------------------------------------------------------------------------
+# check: explain the decision for each path
 
-    foreach (@l) {
-	next if /\/\.claude/;
-	next if /\/\.local/;
-	next if /\/\.exrc/;
-	next if /\/\.vimrc/;
-	$out .= "  (subpath \"$_\")\n";
+sub check_paths {
+    my (@paths) = @_;
+    unless (@paths) {
+        print STDERR "Usage: claude-sandbox check path...\n";
+        exit 1;
     }
-    return $out;
+
+    my @rules = grep { $_->{kind} eq 'rule' } build_rules();
+
+    foreach my $arg (@paths) {
+        my $p = $arg =~ m|^/| ? $arg : getcwd() . "/$arg";
+        $p = norm_path($p);
+        my @chain = expand_links($p);
+        my $real = $chain[-1];
+
+        print "$arg\n";
+        print "  resolves to $real\n" if $real ne $p;
+        foreach my $c ('M', split //, $CATS) {
+            my ($verb, $who) = decide(\@rules, $c, $real);
+            my $why = $who ? "$who->{src}: $who->{text}" : "(default)";
+            printf "  %-8s %-5s  %s\n", $CAT_NAME{$c}, $verb, $why;
+        }
+    }
 }
 
 sub run_claude {
     my @args = @_;
     generate_profile();
 
-    print "→ Running Claude Code sandboxed in:  $project_dir\n";
-    print "→ Profile: $profile_file\n";
-
-    # Enforce safe process limit count
-    system("ulimit -u 1024");
+    print "- Running Claude Code sandboxed in:  $project_dir\n";
+    print "- Profile: $profile_file\n";
+    print "- Config:  $conf_file\n";
 
     my $dir = $ENV{HOME} . "/.claude/logs";
     mkdir($dir);
@@ -345,4 +867,3 @@ sub run_claude {
     exec("script", $path, "sandbox-exec", "-f", $profile_file, @args)
         or die "Failed to execute sandbox-exec: $!";
 }
-
