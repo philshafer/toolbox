@@ -83,6 +83,63 @@ git_diff () {
 
 }
 
+MYHISTFILE=$HOME/.gt_history
+OLDHISTFILE=$HISTFILE
+
+#
+# bash readline support is good.  "read -e" is not, since it intermingles
+# "read" data with script data in a most annoying way.  So we go it alone...
+#
+
+check() {
+     echo check: $1: `cksum $MYHISTFILE` 1>&2
+     tail -2 $MYHISTFILE 1>&2
+}
+
+needs_recorded () {
+    local test="$1"
+
+    if [ "$test" == "" -o "$test" = "==" -o  "$test" = "=" ]; then
+	return 1
+    fi
+
+    if [ "$test" = "ditto" -o "$test" = "uu" -o  "$test" = "tt" ]; then
+	return 1
+    fi
+
+    if grep -q '^'"${test}"'$' $MYHISTFILE ; then
+	return 1
+    fi
+
+    return 0
+}
+
+myreadline() {
+    local prompt="$1" ; shift
+    local answer
+
+    HISTFILE=$MYHISTFILE
+    touch $HISTFILE
+
+    history -c
+    history -r
+
+    check pre-read
+    read -e -p "$prompt" answer
+    check post-read
+
+    HISTFILE=$OLDHISTFILE
+    check post-hist
+
+    if needs_recorded "$answer" ; then
+	check pre-write
+	echo "$answer" >> $MYHISTFILE
+	check post-write
+    fi
+
+    echo $answer
+}
+
 check_in_details () {
     set_branch
     files=`git status -s "$@" | awk '{print $2}'`
@@ -93,7 +150,7 @@ check_in_details () {
 	echo $status
 
         /bin/echo "[Checking $file into branch $branch]"
-	read -e -p "Commit message: " comment
+	comment=`myreadline "Commit message: "`
 	if [ "$comment" = "==" -o  "$comment" = "=" -o "$comment" = "ditto" ]; then
 	    comment="$last"
         fi
@@ -515,6 +572,15 @@ case "$op" in
 	## == Update working copy with repo's changes
 	set_branch
 	run git pull -v $origin $branch
+	;;
+
+    test)
+	while true ; do
+            var=`myreadline "answer: "`
+	    [[ "$var" == "quit" ]] && break;
+            echo "You entered: $var"
+	    tail -2 $MYHISTFILE
+	done
 	;;
 
     *)
