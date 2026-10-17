@@ -1,0 +1,14 @@
+conf:2: unknown option letter "q"
+conf:3: unterminated quote
+conf:4: @rewrite needs exactly two paths
+conf:5: @rewrite takes plain paths
+conf:6: unknown directive "@bogus"
+conf:7: unknown variable "$NOPE"
+conf:8: unknown variable "$CWDX"
+conf:9: missing whitespace after path
+conf:10: environment variable "SB_UNSET" is not set
+conf:11: environment variable "SB_EMPTY" is empty
+conf:12: unterminated "${"
+conf:13: "~user" paths are not supported
+conf:14: no paths given
+Error: bad configuration, profile not generated
