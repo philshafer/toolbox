@@ -23,9 +23,16 @@ case "$LN" in
     [_a-zA-Z][_a-zA-Z][_a-zA-Z][_a-zA-Z]*)
         ARG="+/$LN"
         ;;
+    "")
+	LN=
+	;;
     *)
         ARG="+$LN"
         ;;
 esac
+
+if [ ! -e "$FN" -a -e "../$FN" ]; then
+    FN="../$FN"
+fi
 
 exec $CMD $ARG $FN
