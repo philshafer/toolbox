@@ -580,6 +580,29 @@ def section_title(label, meta):
 def append_section(out, label, meta):
     title = section_title(label, meta)
     out.append(title)
+    out.append("~" * len(title))
+    out.append("")
+
+
+TURN_TITLE_MAX = 50
+
+
+def turn_title(text):
+    """The first non-blank line of the input, cut to TURN_TITLE_MAX
+    characters, as the title of that turn's section -- these are what
+    the sidebar's table of contents lists, so a turn can be found by
+    what was asked."""
+    line = next((l.strip() for l in text.splitlines() if l.strip()), "")
+    line = " ".join(line.expandtabs(8).split())
+    if len(line) > TURN_TITLE_MAX:
+        line = line[:TURN_TITLE_MAX - 3].rstrip() + "..."
+    # A leading backslash keeps a title that starts like a bullet or an
+    # enumerator ("- foo", "1. foo") from being read as a list instead
+    return "\\" + escape_markup(line or "(empty input)")
+
+
+def append_turn(out, title):
+    out.append(title)
     out.append("-" * len(title))
     out.append("")
 
@@ -587,10 +610,12 @@ def append_section(out, label, meta):
 def render_transcript(preamble, preamble_meta, turns):
     out = []
     if preamble:
+        append_turn(out, "(earlier output)")
         append_section(out, "Output:", preamble_meta)
         render_segments(preamble, out)
 
     for input_text, input_meta, output_meta, output_segments in turns:
+        append_turn(out, turn_title(input_text))
         append_section(out, "Input:", input_meta)
         out.extend(markdown_to_rst(input_text).splitlines())
         out.append("")
@@ -613,6 +638,11 @@ DIFF_CSS = """\
 }
 .input-user {
     background-color: #%s;
+}
+/* The sidebar's table of contents lists one entry per turn; hide the
+   Input:/Output: entries below each one */
+div.sphinxsidebarwrapper ul ul ul {
+    display: none;
 }
 """ % (DIFF_ADD_BG, DIFF_DEL_BG, INPUT_USER_BG)
 
@@ -657,6 +687,9 @@ extensions = []
 html_css_files = [%(css)r]
 html_static_path = ["_static"]
 exclude_patterns = ["_build"]
+# One page and no toctree, so the theme's usual "Navigation" sidebar is
+# empty; show this page's own sections (one per turn) instead
+html_sidebars = {"**": ["localtoc.html", "searchbox.html"]}
 """
 
 
@@ -776,7 +809,7 @@ def main(argv):
     # the enclosing <section> too so the pale tan background covers the
     # whole Input: block, not just its heading.
     html = re.sub(
-        r'<section id="([^"]*)">(\s*<h2><abbr class="input-user")',
+        r'<section id="([^"]*)">(\s*<h3><abbr class="input-user")',
         r'<section id="\1" class="input-user">\2',
         html)
     with open(out_html, "w", encoding="utf-8") as f:
