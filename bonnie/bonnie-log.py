@@ -20,12 +20,18 @@
 # than `--hours` (default 48h, by each record's own "timestamp" field)
 # are then dropped from that slice before rendering.
 #
-# Usage: bin/bonnie-jsonl.py TRANSCRIPT.jsonl [FRACTION] [HOURS]
+# Usage: bonnie-log.py TRANSCRIPT.jsonl [FRACTION] [HOURS]
+#        bonnie-log.py --list [COUNT]
+#        bonnie-log.py --help
 #   FRACTION defaults to 0.15 (last 15% of lines).
 #   HOURS defaults to 48 (drop records older than this); 0 disables it.
+#   A relative TRANSCRIPT that doesn't exist is looked up under
+#   ~/.claude/projects/-, so a name printed by --list works as is.
+#   --list shows the COUNT (default 10) most recent transcripts.
 #
 import calendar
 import difflib
+import glob
 import json
 import os
 import re
@@ -670,15 +676,76 @@ def write_sphinx_project(outdir, stem, rst, css):
         })
 
 
+USAGE = """\
+usage: bonnie-log.py TRANSCRIPT.jsonl [FRACTION] [HOURS]
+       bonnie-log.py --list [COUNT]
+       bonnie-log.py --help
+
+  TRANSCRIPT  a Claude Code session transcript; a relative name that
+              doesn't exist is looked up under ~/.claude/projects/-
+              (so the names --list prints work as is)
+  FRACTION    read only the last FRACTION of lines (default %g)
+  HOURS       drop records older than HOURS (default %g; 0 keeps all)
+  --list      show the COUNT (default 10) most recently changed
+              transcripts, newest first
+""" % (DEFAULT_FRACTION, DEFAULT_HOURS)
+
+DEFAULT_LIST_COUNT = 10
+
+
+def projects_prefix():
+    """Where Claude Code keeps transcripts: one directory per project,
+    named for its path with "/" turned into "-", so every directory
+    name starts with "-"."""
+    return os.path.join(os.path.expanduser("~"), ".claude", "projects", "-")
+
+
+def list_transcripts(count):
+    prefix = projects_prefix()
+    paths = glob.glob(prefix + "*/*.jsonl")
+    paths.sort(key=os.path.getmtime, reverse=True)
+    for path in paths[:count]:
+        print(path[len(prefix):])
+    return 0
+
+
+def find_transcript(path):
+    """`path` itself if it exists (or is absolute); otherwise the same
+    name under the projects directory, as --list prints it."""
+    if os.path.exists(path) or os.path.isabs(path):
+        return path
+    alt = projects_prefix() + path
+    return alt if os.path.exists(alt) else path
+
+
 def main(argv):
     import getpass
 
     if len(argv) < 2:
-        sys.stderr.write(
-            "usage: bonnie-jsonl.py TRANSCRIPT.jsonl [FRACTION] [HOURS]\n")
+        sys.stderr.write(USAGE)
         return 1
 
-    logfile = argv[1]
+    if argv[1] in ("-h", "--help"):
+        sys.stdout.write(USAGE)
+        return 0
+
+    if argv[1] == "--list":
+        try:
+            count = int(argv[2]) if len(argv) > 2 else DEFAULT_LIST_COUNT
+        except ValueError:
+            sys.stderr.write("bonnie-log.py: bad --list count: %s\n" % argv[2])
+            return 1
+        return list_transcripts(count)
+
+    if argv[1].startswith("-"):
+        sys.stderr.write("bonnie-log.py: unknown option: %s\n" % argv[1])
+        sys.stderr.write(USAGE)
+        return 1
+
+    logfile = find_transcript(argv[1])
+    if not os.path.exists(logfile):
+        sys.stderr.write("bonnie-log.py: %s: no such file\n" % argv[1])
+        return 1
     fraction = float(argv[2]) if len(argv) > 2 else DEFAULT_FRACTION
     hours = float(argv[3]) if len(argv) > 3 else DEFAULT_HOURS
     stem = "transcript"
