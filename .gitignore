@@ -65,3 +65,6 @@ out
 __pycache__
 
 build
+
+# vi swap files
+*.swp
