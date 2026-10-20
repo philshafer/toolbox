@@ -6,8 +6,8 @@
 #               get it if you don't have it)
 # $Id: htmlwdiff,v 1.1 2003/03/19 21:48:29 fenner Exp $
 #
-a1=`mktemp -t htmlwdiff1`
-a2=`mktemp -t htmlwdiff2`
+a1=`mktemp -t htmlwdiff1.XXXXX`
+a2=`mktemp -t htmlwdiff2.XXXXX`
 sed -e 's/&/&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' $1 > $a1
 sed -e 's/&/&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' $2 > $a2
 echo "<pre>"
