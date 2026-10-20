@@ -7,6 +7,8 @@
 # using the SOFTWARE, you agree to be bound by the terms of that
 # LICENSE.
 
+last=
+
 if [ ! -z "${BASH}" ]; then
     # Use our own history file
     HISTFILE=$HOME/.gt_history
@@ -120,17 +122,27 @@ myreadline() {
     local prompt="$1" ; shift
     local answer
 
+    # Move to _my_ history file
     HISTFILE=$MYHISTFILE
     touch $HISTFILE
 
+    # Read my history file
     history -c
     history -r
 
     read -e -p "$prompt" answer
 
+    # Reset to make history file to keep 'sh' from stepping on us
     HISTFILE=$OLDHISTFILE
 
-    if needs_recorded "$answer" ; then
+    if [ "$answer" = "==" -o  "$answer" = "=" -o "$answer" = "ditto" ]; then
+	answer="$last"
+
+    elif [ "$answer" = "uu" -o  "$answer" = "tt" ]; then
+        answer="update test cases"
+
+    elif needs_recorded "$answer" ; then
+	# We save the answer ourselves (yes, trust issues)
 	echo "$answer" >> $MYHISTFILE
     fi
 
@@ -148,21 +160,14 @@ check_in_details () {
 
         /bin/echo "[Checking $file into branch $branch]"
 	comment=${USE_COMMENT:-`myreadline "Commit message: "`}
-	if [ "$comment" = "==" -o  "$comment" = "=" -o "$comment" = "ditto" ]; then
-	    comment="$last"
-        fi
 
-	use_comment="$comment"
-	if [ "$comment" = "uu" -o  "$comment" = "tt" ]; then
-	    use_comment="update test cases"
-        fi
 	if [ "$comment" = "" ]; then
 	    echo "Skipping file $file";
 	else
 	    if [ "$status" = "?? $file" ]; then
 		git add "$file"
 	    fi
-	    git commit -m "$use_comment" "$file"
+	    git commit -m "$comment" "$file"
 	fi
 	last="$comment"
     done
@@ -182,10 +187,8 @@ amend_comments () {
 	echo $log
 
         /bin/echo "[Changing comment for $file into branch $branch]"
-	read -e -p "Commit message: " comment
-	if [ "$comment" = "==" -o  "$comment" = "=" -o "$comment" = "ditto" ]; then
-	    comment="$last"
-        fi
+	comment=${USE_COMMENT:-`myreadline "Commit message: "`}
+
 	if [ "$comment" = "" ]; then
 	    echo "Skipping file $file";
 	else
@@ -194,6 +197,7 @@ amend_comments () {
 	    fi
 	    git commit --amend -m "$comment" "$file"
 	fi
+
 	last="$comment"
     done
 }
@@ -269,7 +273,7 @@ case "$op" in
 	    opts=-a
 	fi
 
-	read -e -p "Comment message: " comment
+	comment=${USE_COMMENT:-`myreadline "Commit message: "`}
 	if [ "$comment" = "" ]; then
 	    echo "Commit aborted"
 	else
