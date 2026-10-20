@@ -639,6 +639,20 @@ DIFF_CSS = """\
 .input-user {
     background-color: #%s;
 }
+/* "next" button at the right end of each Input: heading */
+a.next-input {
+    float: right;
+    font-size: 0.6em;
+    padding: 2px 10px;
+    color: black;
+    background-color: white;
+    border: 1px solid #888;
+    border-radius: 4px;
+    text-decoration: none;
+}
+a.next-input:hover {
+    background-color: #eee;
+}
 /* The sidebar's table of contents lists one entry per turn; hide the
    Input:/Output: entries below each one */
 div.sphinxsidebarwrapper ul ul ul {
@@ -707,6 +721,52 @@ def write_sphinx_project(outdir, stem, rst, css):
             "stem": stem,
             "css": stem + ".css",
         })
+
+
+def postprocess_html(html):
+    """Fix-ups on the built HTML that rST markup can't express."""
+    # docutils collapses a real newline inside a :abbr: role's source text
+    # to a single space, so TIP_BREAK stood in for the line break through
+    # the build; swap it for a real newline now that docutils is done --
+    # browsers render an embedded newline in a `title` attribute as a
+    # multi-line tooltip, but only if it's a real newline byte.
+    html = html.replace(TIP_BREAK, "\n")
+    # Sphinx wraps each rST section in its own <section id="...">...
+    # </section>; the "input-user" class lives only on the <abbr> inside
+    # the heading (that's as close to the title as the rST role markup
+    # can reach), which only tints the title text. Carry the class onto
+    # the enclosing <section> too so the pale tan background covers the
+    # whole Input: block, not just its heading.
+    html = re.sub(
+        r'<section id="([^"]*)">(\s*<h3><abbr class="input-user")',
+        r'<section id="\1" class="input-user">\2',
+        html)
+    return add_next_buttons(html)
+
+
+# A turn's section (titled by its input) directly followed by its
+# Input: section; group 1 is the turn's id, group 2 the Input: heading
+_TURN_INPUT_RE = re.compile(
+    r'<section id="([^"]*)">\s*<h2>.*?</h2>\s*'
+    r'(<section id="[^"]*" class="input-user">\s*<h3>.*?)(</h3>)',
+    re.DOTALL)
+
+
+def add_next_buttons(html):
+    """Puts a "next" button at the right end of each Input: heading,
+    linking to the following turn (its title, just above its Input:).
+    The last turn's Input: has nothing to link to, so gets no button."""
+    turn_ids = [m.group(1) for m in _TURN_INPUT_RE.finditer(html)]
+    next_id = dict(zip(turn_ids, turn_ids[1:]))
+
+    def add(m):
+        target = next_id.get(m.group(1))
+        if target is None:
+            return m.group(0)
+        button = '<a class="next-input" href="#%s" title="Next input">next</a>' % target
+        return m.group(0)[:-len(m.group(3))] + button + m.group(3)
+
+    return _TURN_INPUT_RE.sub(add, html)
 
 
 USAGE = """\
@@ -793,25 +853,10 @@ def main(argv):
 
     subprocess.run(["sphinx-build", "-b", "html", outdir, builddir], check=True)
 
-    # docutils collapses a real newline inside a :abbr: role's source text
-    # to a single space, so TIP_BREAK stood in for the line break through
-    # the build; swap it for a real newline now that docutils is done --
-    # browsers render an embedded newline in a `title` attribute as a
-    # multi-line tooltip, but only if it's a real newline byte.
     out_html = os.path.join(builddir, stem + ".html")
     with open(out_html, "r", encoding="utf-8") as f:
         html = f.read()
-    html = html.replace(TIP_BREAK, "\n")
-    # Sphinx wraps each rST section in its own <section id="...">...
-    # </section>; the "input-user" class lives only on the <abbr> inside
-    # the heading (that's as close to the title as the rST role markup
-    # can reach), which only tints the title text. Carry the class onto
-    # the enclosing <section> too so the pale tan background covers the
-    # whole Input: block, not just its heading.
-    html = re.sub(
-        r'<section id="([^"]*)">(\s*<h3><abbr class="input-user")',
-        r'<section id="\1" class="input-user">\2',
-        html)
+    html = postprocess_html(html)
     with open(out_html, "w", encoding="utf-8") as f:
         f.write(html)
 
