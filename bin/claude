@@ -6,6 +6,9 @@ export CLAUDE_CODE_DISABLE_1M_CONTEXT=1
 export EDITOR=$HOME/bin/claude-vi
 export VISUAL=$HOME/bin/claude-vi
 
+# Limit claude's damage radius
+unset SSH_AUTH_SOCK SSH_AGENT_PID
+
 export PATH="$HOME/.local/bin:$PATH"
 
 exec ~/.local/bin/claude "$@"
