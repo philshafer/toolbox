@@ -690,6 +690,9 @@ EOF
 # ---------- Claude config & token files ---------------------------
 +rw ~/.claude/ r"^${HOME}/\.claude\.json(\..*)?$"
 
+# ----------  Required for "claude update"  ---------------
++rw ~/.local/share/claude/ ~/.cache/claude/staging
+
 # ---------- time-zone & prefs (RO) --------------------------------
 +r /private/var/db/timezone/ /Library/Preferences/ ~/Library/Preferences/
 
