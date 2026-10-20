@@ -154,7 +154,9 @@ check_in_details () {
     files=`git status -s "$@" | awk '{print $2}'`
 
     for file in $files; do
-	git diff $file
+	if [ "${SHOW_DIFFS}" != "no" ]; then
+	    git diff $file
+	fi
         status=`git status -s "$file"`
 	echo $status
 
@@ -291,6 +293,7 @@ case "$op" in
     citt)
 	# "ci" + "tt" == "citt"
 	USE_COMMENT=tt
+	SHOW_DIFFS=no
 	check_in_details "$@"
 	;;
 	
