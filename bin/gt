@@ -294,7 +294,7 @@ case "$op" in
 	# "ci" + "tt" == "citt"
 	USE_COMMENT=tt
 	SHOW_DIFFS=no
-	check_in_details "$@"
+	check_in_details "${@:-../tests}"
 	;;
 	
 
