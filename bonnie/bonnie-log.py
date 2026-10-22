@@ -639,10 +639,12 @@ DIFF_CSS = """\
 .input-user {
     background-color: #%s;
 }
-/* "next" button at the right end of each Input: heading */
-a.next-input {
+/* "prev"/"next" buttons at the right end of each Input: heading */
+span.nav-input {
     float: right;
     font-size: 0.6em;
+}
+a.nav-input {
     padding: 2px 10px;
     color: black;
     background-color: white;
@@ -650,7 +652,7 @@ a.next-input {
     border-radius: 4px;
     text-decoration: none;
 }
-a.next-input:hover {
+a.nav-input:hover {
     background-color: #eee;
 }
 /* The sidebar's table of contents lists one entry per turn; hide the
@@ -741,7 +743,7 @@ def postprocess_html(html):
         r'<section id="([^"]*)">(\s*<h3><abbr class="input-user")',
         r'<section id="\1" class="input-user">\2',
         html)
-    return add_next_buttons(html)
+    return add_nav_buttons(html)
 
 
 # A turn's section (titled by its input) directly followed by its
@@ -752,19 +754,27 @@ _TURN_INPUT_RE = re.compile(
     re.DOTALL)
 
 
-def add_next_buttons(html):
-    """Puts a "next" button at the right end of each Input: heading,
-    linking to the following turn (its title, just above its Input:).
-    The last turn's Input: has nothing to link to, so gets no button."""
+def add_nav_buttons(html):
+    """Puts "prev" and "next" buttons at the right end of each Input:
+    heading, linking to the previous and following turns (their titles,
+    just above their Input:). The first turn gets no "prev" and the
+    last no "next", having nothing to link to."""
     turn_ids = [m.group(1) for m in _TURN_INPUT_RE.finditer(html)]
     next_id = dict(zip(turn_ids, turn_ids[1:]))
+    prev_id = dict(zip(turn_ids[1:], turn_ids))
 
     def add(m):
-        target = next_id.get(m.group(1))
-        if target is None:
+        buttons = []
+        for label, tip, target in (
+                ("prev", "Previous input", prev_id.get(m.group(1))),
+                ("next", "Next input", next_id.get(m.group(1)))):
+            if target is not None:
+                buttons.append('<a class="nav-input" href="#%s" title="%s">%s</a>'
+                               % (target, tip, label))
+        if not buttons:
             return m.group(0)
-        button = '<a class="next-input" href="#%s" title="Next input">next</a>' % target
-        return m.group(0)[:-len(m.group(3))] + button + m.group(3)
+        nav = '<span class="nav-input">%s</span>' % " ".join(buttons)
+        return m.group(0)[:-len(m.group(3))] + nav + m.group(3)
 
     return _TURN_INPUT_RE.sub(add, html)
 
