@@ -257,6 +257,36 @@ _FENCE_RE = re.compile(r'^(```|~~~)\s*([\w+-]*)\s*$')
 _HEADER_RE = re.compile(r'^(#{1,6})\s+(.*)$')
 _LIST_RE = re.compile(r'^(\s*)([-*+]|\d+[.)])\s+(.*)$')
 _QUOTE_RE = re.compile(r'^>\s?(.*)$')
+# A markdown table's second line: "|---|:---:|" and friends
+_TABLE_SEP_RE = re.compile(r'^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?$')
+
+
+def table_cells(line):
+    """Splits a markdown table row on its unescaped "|"s, dropping the
+    optional ones at either end; a "\\|" is a literal "|" in a cell."""
+    s = line.strip()
+    if s.startswith("|"):
+        s = s[1:]
+    if s.endswith("|") and not s.endswith("\\|"):
+        s = s[:-1]
+    return [c.strip().replace("\\|", "|") for c in re.split(r'(?<!\\)\|', s)]
+
+
+def table_to_rst(rows, pad):
+    """A markdown table as an rST list-table: unlike a grid or simple
+    table, it needs no column alignment, so cells of any length (and
+    with inline markup that changes their width) just work. The first
+    row is the header; short rows are padded, since list-table insists
+    every row has the same number of cells."""
+    width = max(len(r) for r in rows)
+    out = [pad + ".. list-table::", pad + "   :header-rows: 1", ""]
+    for row in rows:
+        row = row + [""] * (width - len(row))
+        for i, cell in enumerate(row):
+            lead = "   * - " if i == 0 else "     - "
+            out.append((pad + lead + inline_to_rst(cell)).rstrip())
+    out.append("")
+    return out
 
 
 def markdown_to_rst(text):
@@ -301,6 +331,19 @@ def markdown_to_rst(text):
             if not code_lines:
                 out.append("")
             out.append("")
+            continue
+
+        if (stripped.startswith("|") and i + 1 < n
+                and _TABLE_SEP_RE.match(lines[i + 1].strip())):
+            rows = [table_cells(line)]
+            i += 2
+            while i < n and lines[i].strip().startswith("|"):
+                rows.append(table_cells(lines[i]))
+                i += 1
+            blank_before()
+            # Same as a code block: indent under a list item it's part of
+            pad = " " * (last_list_indent + 2) if in_list else ""
+            out.extend(table_to_rst(rows, pad))
             continue
 
         m = _HEADER_RE.match(stripped)
