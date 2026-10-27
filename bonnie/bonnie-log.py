@@ -11,7 +11,7 @@
 # These transcripts are append-only logs of a session that can be
 # resumed over days or weeks, so byte offset has no reliable relationship
 # to wall-clock time; "take the tail" is just "take the most recent
-# records" by line order, not a time window. Only the last `--fraction`
+# records" by line order, not a time window. Only the last `--percent`
 # of lines (default 15%) is read at all -- `wc -l`/`head`/`tail` do the
 # slicing in the shell so the full file (which can be 50-100MB+) is never
 # read or parsed in this process. That line-count slice is just a cheap
@@ -20,11 +20,11 @@
 # than `--hours` (default 48h, by each record's own "timestamp" field)
 # are then dropped from that slice before rendering.
 #
-# Usage: bonnie-log.py TRANSCRIPT.jsonl [FRACTION] [HOURS]
+# Usage: bonnie-log.py [--percent PERCENT] [--hours HOURS] TRANSCRIPT.jsonl
 #        bonnie-log.py --list [COUNT]
 #        bonnie-log.py --help
-#   FRACTION defaults to 0.15 (last 15% of lines).
-#   HOURS defaults to 48 (drop records older than this); 0 disables it.
+#   --percent defaults to 15 (read the last 15% of lines).
+#   --hours defaults to 48 (drop records older than this); 0 disables it.
 #   A relative TRANSCRIPT that doesn't exist is looked up under
 #   ~/.claude/projects/-, so a name printed by --list works as is.
 #   --list shows the COUNT (default 10) most recent transcripts.
@@ -39,7 +39,7 @@ import subprocess
 import sys
 import time
 
-DEFAULT_FRACTION = 0.15
+DEFAULT_PERCENT = 15
 DEFAULT_HOURS = 48
 HEADER_LINES = 1
 
@@ -823,18 +823,22 @@ def add_nav_buttons(html):
 
 
 USAGE = """\
-usage: bonnie-log.py TRANSCRIPT.jsonl [FRACTION] [HOURS]
+usage: bonnie-log.py [--percent PERCENT] [--hours HOURS] TRANSCRIPT.jsonl
        bonnie-log.py --list [COUNT]
        bonnie-log.py --help
 
-  TRANSCRIPT  a Claude Code session transcript; a relative name that
-              doesn't exist is looked up under ~/.claude/projects/-
-              (so the names --list prints work as is)
-  FRACTION    read only the last FRACTION of lines (default %g)
-  HOURS       drop records older than HOURS (default %g; 0 keeps all)
-  --list      show the COUNT (default 10) most recently changed
-              transcripts, newest first
-""" % (DEFAULT_FRACTION, DEFAULT_HOURS)
+  TRANSCRIPT         a Claude Code session transcript; a relative name
+                     that doesn't exist is looked up under
+                     ~/.claude/projects/- (so the names --list prints
+                     work as is)
+  --percent PERCENT  read only the last PERCENT of lines (default %g)
+  --hours HOURS      drop records older than HOURS (default %g;
+                     0 keeps all)
+  --list             show the COUNT (default 10) most recently changed
+                     transcripts, newest first
+
+  "--percent=PERCENT" and "--hours=HOURS" also work.
+""" % (DEFAULT_PERCENT, DEFAULT_HOURS)
 
 DEFAULT_LIST_COUNT = 10
 
@@ -883,17 +887,52 @@ def main(argv):
             return 1
         return list_transcripts(count)
 
-    if argv[1].startswith("-"):
-        sys.stderr.write("bonnie-log.py: unknown option: %s\n" % argv[1])
+    percent = DEFAULT_PERCENT
+    hours = DEFAULT_HOURS
+    files = []
+    args = argv[1:]
+    while args:
+        arg = args.pop(0)
+        if not arg.startswith("-"):
+            files.append(arg)
+            continue
+        name, eq, value = arg.partition("=")
+        if name not in ("--percent", "--hours"):
+            sys.stderr.write("bonnie-log.py: unknown option: %s\n" % arg)
+            sys.stderr.write(USAGE)
+            return 1
+        if not eq:
+            if not args:
+                sys.stderr.write("bonnie-log.py: %s needs a value\n" % name)
+                return 1
+            value = args.pop(0)
+        try:
+            number = float(value)
+        except ValueError:
+            number = -1
+        if name == "--percent":
+            if not 0 < number <= 100:
+                sys.stderr.write("bonnie-log.py: bad --percent value: %s"
+                                 " (want more than 0, up to 100)\n" % value)
+                return 1
+            percent = number
+        else:
+            if number < 0:
+                sys.stderr.write("bonnie-log.py: bad --hours value: %s\n"
+                                 % value)
+                return 1
+            hours = number
+
+    if len(files) != 1:
+        sys.stderr.write("bonnie-log.py: want exactly one TRANSCRIPT\n")
         sys.stderr.write(USAGE)
         return 1
 
-    logfile = find_transcript(argv[1])
+    logfile = find_transcript(files[0])
     if not os.path.exists(logfile):
-        sys.stderr.write("bonnie-log.py: %s: no such file\n" % argv[1])
+        sys.stderr.write("bonnie-log.py: %s: no such file\n" % files[0])
         return 1
-    fraction = float(argv[2]) if len(argv) > 2 else DEFAULT_FRACTION
-    hours = float(argv[3]) if len(argv) > 3 else DEFAULT_HOURS
+    fraction = percent / 100.0
     stem = "transcript"
 
     user = os.environ.get("USER") or getpass.getuser()
