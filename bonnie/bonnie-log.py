@@ -35,6 +35,7 @@ import glob
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -868,12 +869,42 @@ def find_transcript(path):
     return alt if os.path.exists(alt) else path
 
 
-def main(argv):
+MAX_RUN_AGE_DAYS = 14
+
+
+def top_outdir():
     import getpass
 
+    user = os.environ.get("USER") or getpass.getuser()
+    return "/tmp/%s-bonnie" % user
+
+
+def remove_old_runs(topdir, days=MAX_RUN_AGE_DAYS):
+    """Each run writes into its own dated directory under `topdir`;
+    drop the ones that haven't been touched in `days` days."""
+    cutoff = time.time() - days * 24 * 60 * 60
+    try:
+        names = os.listdir(topdir)
+    except OSError:
+        return
+    for name in names:
+        path = os.path.join(topdir, name)
+        try:
+            if os.path.isdir(path) and not os.path.islink(path) \
+                    and os.path.getmtime(path) < cutoff:
+                shutil.rmtree(path)
+        except OSError as e:
+            sys.stderr.write("bonnie-log.py: can't remove %s: %s\n"
+                             % (path, e))
+
+
+def main(argv):
+    topdir = top_outdir()
+    remove_old_runs(topdir)
+
     if len(argv) < 2:
-        sys.stderr.write(USAGE)
-        return 1
+        list_transcripts(DEFAULT_LIST_COUNT)
+        return 0
 
     if argv[1] in ("-h", "--help"):
         sys.stdout.write(USAGE)
@@ -935,8 +966,9 @@ def main(argv):
     fraction = percent / 100.0
     stem = "transcript"
 
-    user = os.environ.get("USER") or getpass.getuser()
-    outdir = "/tmp/%s-bonnie" % user
+    # Same format as `/bin/date "+%y%m%d%H%M.%S"`
+    pdate = time.strftime("%y%m%d%H%M.%S")
+    outdir = os.path.join(topdir, pdate)
     os.makedirs(outdir, exist_ok=True)
     builddir = os.path.join(outdir, "_build", "html")
 
