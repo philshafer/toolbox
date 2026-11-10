@@ -9,6 +9,8 @@
 
 last=
 
+gt_more="${GT_MORE:-more} ${GT_MORE_OPTS:--eq -+c}"
+
 if [ ! -z "${BASH}" ]; then
     # Use our own history file
     HISTFILE=$HOME/.gt_history
@@ -78,7 +80,7 @@ git_diff () {
     esac
 
     if [ -t 1 ]; then
-	git diff $diff_args "$@" | MORE=-e more
+	git diff $diff_args "$@" | $gt_more
     else
 	git diff $diff_args "$@"
     fi
@@ -292,7 +294,7 @@ case "$op" in
 
     citt)
 	# "ci" + "tt" == "citt"
-	USE_COMMENT=tt
+	USE_COMMENT="update test cases"
 	SHOW_DIFFS=no
 	check_in_details "${@:-../tests}"
 	;;
@@ -346,12 +348,22 @@ case "$op" in
         echo "clone gh-pages into gh-page; 'cd gh-pages && gt rm -fr .' to clean it"
         ;;
 
-    diff|dif|d|delta)
+    diff|dif|di|d|delta)
 	## gt diff [<files>]
 	## == Display uncommitted diffs
 	## == To show specific commit: gt diff commit <hex>
         git_diff "$@"
 	;;
+
+
+    force-update|force-pull)
+	## gt force-update
+	## == Update working copy with repo's changes
+	## == (using "-c pull.rebase=false" to force a merge)
+	set_branch
+	run git -c pull.rebase=false pull -v $origin $branch
+	;;
+
 
     info)
 	## gt info
