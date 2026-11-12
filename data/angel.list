@@ -1,0 +1,19 @@
+# Angel site list -- one entry per line
+# an entry matches that host and all its subdomains
+# wildcards are fnmatch(3) style
+wikipedia.org
+washingtonpost.com
+latimes.com
+theguardian.com
+nypost.com
+bonginoreport.com
+breitbart.com
+justthenews.com
+townhall.com
+cnn.com
+theepochtimes.com
+foxnews.com
+abcnews.com
+people.com
+sltrib.com
+bbc.com
