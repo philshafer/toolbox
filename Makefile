@@ -38,6 +38,7 @@ bin-files:
 INSTALL_TOOLS = \
     install-bonnie \
     install-claude-sandbox \
+    install-localedump \
     install-memdump \
     install-title \
     install-ytplay
@@ -73,6 +74,10 @@ ${DESTDIR}/ytplay: ytplay/ytplay.sh ${FORCE}
 install-memdump: ${DESTDIR}/memdump
 ${DESTDIR}/memdump: memdump/memdump.c ${FORCE}
 	cc -O -DMAIN -o ${DESTDIR}/memdump memdump/memdump.c
+
+install-localedump: ${DESTDIR}/localedump
+${DESTDIR}/localedump: localedump/localedump.c ${FORCE}
+	cc -O -o ${DESTDIR}/localedump localedump/localedump.c
 
 install-title: ${DESTDIR}/title
 ${DESTDIR}/title: title/title.c ${FORCE}
