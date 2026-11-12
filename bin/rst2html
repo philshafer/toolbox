@@ -3,6 +3,10 @@
 import docutils.core 
 import sys, getopt
 import os
+import getpass
+import hashlib
+import shlex
+import time
   
 def html(input, output):
     docutils.core.publish_file( 
@@ -10,14 +14,33 @@ def html(input, output):
         destination_path = output,
         writer_name ="html") 
 
+MAX_AGE_DAYS = 14
+
+def remove_old_files(top, days = MAX_AGE_DAYS):
+   # Drop files that haven't been rewritten in `days` days, then any
+   # directories left empty
+   cutoff = time.time() - days * 24 * 60 * 60
+   for dirpath, dirnames, filenames in os.walk(top, topdown = False):
+      for name in filenames:
+         path = os.path.join(dirpath, name)
+         try:
+            if os.lstat(path).st_mtime < cutoff:
+               os.remove(path)
+         except OSError:
+            pass
+      if dirpath != top:
+         try:
+            os.rmdir(dirpath)       # fails (fine) if not empty
+         except OSError:
+            pass
+
 def main(argv):
    inputfile = ''
    outputfile = ''
 
-   DIR = "/tmp/phil.md"
-   os.system(f"rm -fr {DIR}/md-*.html")
-
-   os.system(f"mkdir -p {DIR}")
+   user = os.environ.get("USER") or getpass.getuser()
+   DIR = f"/tmp/{user}-rst"
+   remove_old_files(DIR)
 
    opts, args = getopt.getopt(argv,"hi:o:",["ifile=","ofile="])
    for opt, arg in opts:
@@ -42,13 +65,18 @@ def main(argv):
       if len(args) > 0:
          outputfile = args.pop(0)
       else:
-         pid = os.getpid()
+         # Same input file, same output path, so an open window can
+         # just be refreshed
+         path = os.path.abspath(inputfile)
+         hash = hashlib.md5(path.encode()).hexdigest()
          base = os.path.basename(inputfile)
-         outputfile = f"{DIR}/md-{pid}-{base}.html"
+         outdir = f"{DIR}/{hash}"
+         os.makedirs(outdir, exist_ok = True)
+         outputfile = f"{outdir}/{base}.html"
 
    html(inputfile, outputfile)
 
-   os.system(f"open {outputfile}")
+   os.system(f"open {shlex.quote(outputfile)}")
 
 if __name__ == "__main__":
    main(sys.argv[1:])
