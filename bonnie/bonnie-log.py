@@ -966,9 +966,12 @@ def main(argv):
     fraction = percent / 100.0
     stem = "transcript"
 
-    # Same format as `/bin/date "+%y%m%d%H%M.%S"`
-    pdate = time.strftime("%y%m%d%H%M.%S")
-    outdir = os.path.join(topdir, pdate)
+    # One directory per transcript, named for its session hash
+    # (`basename $logfile .jsonl`)
+    session = os.path.basename(logfile)
+    if session.endswith(".jsonl"):
+        session = session[:-len(".jsonl")]
+    outdir = os.path.join(topdir, session)
     os.makedirs(outdir, exist_ok=True)
     builddir = os.path.join(outdir, "_build", "html")
 
