@@ -2,6 +2,11 @@
 *.d
 
 plans
+angel/Cargo.lock
+angel/data
+angel/spike
+angel/target
+angel/tests/fixtures
 
 *~
 #*
